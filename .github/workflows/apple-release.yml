@@ -1,0 +1,31 @@
+name: Apple Release
+
+on:
+  push:
+    tags:
+      - apple-v*
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Build unsigned macOS app
+        run: |
+          xcodebuild -project apple/Textory/Textory.xcodeproj -scheme Textory -configuration Release -derivedDataPath build CODE_SIGN_IDENTITY="" CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO build
+
+      # TODO: code signing & notarization once certs are available
+
+      - name: Zip macOS app
+        run: |
+          cd build/Build/Products/Release
+          zip -r ../../../Textory-macOS.zip Textory.app
+
+      - name: Create release
+        run: gh release create "$GITHUB_REF_NAME" Textory-macOS.zip --generate-notes
+        env:
+          GH_TOKEN: ${{ github.token }}

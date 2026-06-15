@@ -1,0 +1,44 @@
+name: CLI Release
+
+on:
+  push:
+    tags:
+      - cli-v*
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-go@v4
+        with:
+          go-version-file: cli/go.mod
+
+      - name: Run tests
+        run: go test ./...
+        working-directory: cli
+
+      - name: Run vet
+        run: go vet ./...
+        working-directory: cli
+
+      - name: Build darwin/arm64
+        run: GOOS=darwin GOARCH=arm64 go build -trimpath -ldflags "-s -w" -o txt-darwin-arm64 .
+        working-directory: cli
+
+      - name: Build darwin/amd64
+        run: GOOS=darwin GOARCH=amd64 go build -trimpath -ldflags "-s -w" -o txt-darwin-amd64 .
+        working-directory: cli
+
+      - name: Build windows/amd64
+        run: GOOS=windows GOARCH=amd64 go build -trimpath -ldflags "-s -w" -o txt-windows-amd64.exe .
+        working-directory: cli
+
+      - name: Create release
+        run: gh release create "$GITHUB_REF_NAME" cli/txt-darwin-arm64 cli/txt-darwin-amd64 cli/txt-windows-amd64.exe --generate-notes
+        env:
+          GH_TOKEN: ${{ github.token }}

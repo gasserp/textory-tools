@@ -1,0 +1,120 @@
+:root {
+  --font-mono: ui-monospace, "Cascadia Code", "JetBrains Mono", Consolas, monospace;
+  --radius: 2px;
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+}
+
+:root[data-theme="dark"] {
+  --bg: #0d0f10;
+  --bg-raised: #16191b;
+  --fg: #d4d4d4;
+  --fg-dim: #8a8f93;
+  --accent: #d7a64c;
+  --danger: #f97583;
+  --ok: #7ee787;
+  --border: #2a2e31;
+  --focus: #d7a64c;
+}
+
+:root[data-theme="light"] {
+  --bg: #fafafa;
+  --bg-raised: #ffffff;
+  --fg: #1a1a1a;
+  --fg-dim: #6e6e6e;
+  --accent: #8a6d00;
+  --danger: #b3261e;
+  --ok: #1f8a4c;
+  --border: #d0d0d0;
+  --focus: #8a6d00;
+}
+
+:root[data-theme="dark-hc"] {
+  --bg: #000000;
+  --bg-raised: #0a0a0a;
+  --fg: #ffffff;
+  --fg-dim: #cccccc;
+  --accent: #ffd000;
+  --danger: #ff6666;
+  --ok: #66ff99;
+  --border: #ffffff;
+  --focus: #ffd000;
+}
+
+:root[data-theme="light-hc"] {
+  --bg: #ffffff;
+  --bg-raised: #f0f0f0;
+  --fg: #000000;
+  --fg-dim: #333333;
+  --accent: #6b4400;
+  --danger: #b00000;
+  --ok: #006400;
+  --border: #000000;
+  --focus: #6b4400;
+}
+
+body {
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--font-mono);
+}
+
+*:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 1px;
+}
+
+:root[data-theme="dark-hc"] *:focus-visible,
+:root[data-theme="light-hc"] *:focus-visible {
+  outline-width: 3px;
+}
+
+/* highlight.js syntax tokens, mapped to theme tokens */
+.hljs {
+  color: var(--fg);
+  background: transparent;
+}
+
+.hljs-comment,
+.hljs-quote {
+  color: var(--fg-dim);
+  font-style: italic;
+}
+
+.hljs-keyword,
+.hljs-selector-tag,
+.hljs-literal,
+.hljs-section,
+.hljs-link {
+  color: var(--accent);
+}
+
+.hljs-string,
+.hljs-title,
+.hljs-name,
+.hljs-type,
+.hljs-attribute,
+.hljs-symbol,
+.hljs-bullet,
+.hljs-addition,
+.hljs-variable,
+.hljs-template-tag,
+.hljs-template-variable {
+  color: var(--ok);
+}
+
+.hljs-deletion,
+.hljs-number,
+.hljs-meta {
+  color: var(--danger);
+}
+
+.hljs-emphasis {
+  font-style: italic;
+}
+
+.hljs-strong {
+  font-weight: bold;
+}

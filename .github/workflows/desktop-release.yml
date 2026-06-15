@@ -1,0 +1,47 @@
+name: Desktop Release
+
+on:
+  push:
+    tags:
+      - desktop-v*
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install root dependencies
+        run: npm ci
+
+      - name: Install desktop (Tauri CLI) dependencies
+        run: npm install
+        working-directory: desktop
+
+      - name: Build Svelte native bundle
+        run: npm run build:native -w app
+
+      - name: Build Tauri app
+        run: npx tauri build --bundles msi,nsis
+        working-directory: desktop
+
+      - name: Create release
+        shell: bash
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            desktop/src-tauri/target/release/bundle/msi/*.msi \
+            desktop/src-tauri/target/release/bundle/nsis/*.exe \
+            --generate-notes
+        env:
+          GH_TOKEN: ${{ github.token }}

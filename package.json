@@ -1,0 +1,14 @@
+{
+  "name": "textory-tools",
+  "private": true,
+  "version": "0.0.0",
+  "workspaces": ["app", "desktop"],
+  "scripts": {
+    "dev": "npm run dev -w app",
+    "build": "npm run build -w app"
+  },
+  "overrides": {
+    "tmp": "^0.2.6",
+    "esbuild": "^0.28.1"
+  }
+}
