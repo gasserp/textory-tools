@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   release:
-    runs-on: macos-latest
+    runs-on: macos-26
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
 
@@ -20,19 +20,43 @@ jobs:
           MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
           KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
         run: |
+          set -euo pipefail
+
           CERT_PATH="$RUNNER_TEMP/certificate.p12"
           KEYCHAIN_PATH="$RUNNER_TEMP/app-signing.keychain-db"
 
+          if [ -z "${MACOS_CERTIFICATE_P12:-}" ]; then
+            echo "::error::MACOS_CERTIFICATE_P12 secret is empty or unset" >&2
+            exit 1
+          fi
+
           echo "$MACOS_CERTIFICATE_P12" | base64 --decode > "$CERT_PATH"
+
+          # Verify the .p12 actually contains a private key before importing.
+          if ! openssl pkcs12 -in "$CERT_PATH" -nokeys -passin pass:"$MACOS_CERTIFICATE_PASSWORD" -legacy >/dev/null 2>&1 \
+            && ! openssl pkcs12 -in "$CERT_PATH" -nokeys -passin pass:"$MACOS_CERTIFICATE_PASSWORD" >/dev/null 2>&1; then
+            echo "::error::Could not read the .p12 — check that MACOS_CERTIFICATE_P12 is valid base64 and MACOS_CERTIFICATE_PASSWORD is correct" >&2
+            exit 1
+          fi
 
           security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
           security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
           security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
 
+          # Add the new keychain to the search list before importing so later
+          # queries (set-key-partition-list, codesign) can find the identity.
+          security list-keychain -d user -s "$KEYCHAIN_PATH" login.keychain-db
+
           security import "$CERT_PATH" -P "$MACOS_CERTIFICATE_PASSWORD" \
             -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
           security set-key-partition-list -S apple-tool:,apple: -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
-          security list-keychain -d user -s "$KEYCHAIN_PATH" login.keychain-db
+
+          # Fail early with a clear message if no signing identity is present.
+          if ! security find-identity -v -p codesigning "$KEYCHAIN_PATH" | grep -q "Developer ID\|Apple Develop"; then
+            echo "::error::No code-signing identity found after import — the .p12 likely has no private key" >&2
+            security find-identity -v -p codesigning "$KEYCHAIN_PATH" >&2 || true
+            exit 1
+          fi
 
       - name: Build unsigned macOS app
         run: |

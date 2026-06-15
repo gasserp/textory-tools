@@ -24,8 +24,12 @@ final class AuthStore {
 
     let api: APIClient
 
-    init(api: APIClient = APIClient()) {
-        self.api = api
+    // Note: the `APIClient()` fallback is constructed in the body rather than
+    // as a default argument. A `@MainActor`-isolated default value crashes
+    // SILGen in the Swift 6.1 toolchain (Xcode 16.4) used by CI, though it
+    // compiles fine on newer toolchains.
+    init(api: APIClient? = nil) {
+        self.api = api ?? APIClient()
     }
 
     /// Reads any persisted token from the Keychain and resolves the current
