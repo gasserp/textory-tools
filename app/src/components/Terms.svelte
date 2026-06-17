@@ -31,7 +31,8 @@
   <h3>4. data</h3>
   <p>
     Snippets and your encrypted API key are stored in Azure (Cosmos DB). Snippets are private to your account.
-    Admins can see account metadata (login, quota, usage) but not snippet content in the app.
+    Admins can see account metadata (login, quota, usage) but not snippet content in the app. See the
+    <a href="/privacy.html">privacy policy</a> for full details on what we collect and share.
   </p>
 
   <h3>5. termination</h3>
@@ -79,6 +80,10 @@
   }
 
   strong {
+    color: var(--accent);
+  }
+
+  a {
     color: var(--accent);
   }
 </style>
