@@ -38,7 +38,72 @@ jobs:
         run: GOOS=windows GOARCH=amd64 go build -trimpath -ldflags "-s -w" -o txt-windows-amd64.exe .
         working-directory: cli
 
+      - name: Create darwin tarballs
+        run: |
+          cp cli/txt-darwin-arm64 txt && tar -czf txt-darwin-arm64.tar.gz txt && rm txt
+          cp cli/txt-darwin-amd64 txt && tar -czf txt-darwin-amd64.tar.gz txt && rm txt
+
       - name: Create release
-        run: gh release create "$GITHUB_REF_NAME" cli/txt-darwin-arm64 cli/txt-darwin-amd64 cli/txt-windows-amd64.exe --generate-notes
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            txt-darwin-arm64.tar.gz \
+            txt-darwin-amd64.tar.gz \
+            cli/txt-windows-amd64.exe \
+            --generate-notes
         env:
           GH_TOKEN: ${{ github.token }}
+
+      - name: Update Homebrew formula
+        env:
+          TAP_TOKEN: ${{ secrets.TAP_TOKEN }}
+        run: |
+          set -euo pipefail
+          VERSION="${GITHUB_REF_NAME#cli-v}"
+          SHA_ARM64=$(sha256sum txt-darwin-arm64.tar.gz | awk '{print $1}')
+          SHA_AMD64=$(sha256sum txt-darwin-amd64.tar.gz | awk '{print $1}')
+
+          git clone "https://x-access-token:${TAP_TOKEN}@github.com/gasserp/homebrew-tap.git" tap
+          cd tap
+
+          export VERSION SHA_ARM64 SHA_AMD64
+          python3 << 'PYEOF'
+          import os, re
+          v = os.environ["VERSION"]
+          arm = os.environ["SHA_ARM64"]
+          amd = os.environ["SHA_AMD64"]
+          txt = open("Formula/txt.rb").read()
+          txt = re.sub(r'(  version ")[^"]*"', f'\\g<1>{v}"', txt)
+          shas = iter([arm, amd])
+          txt = re.sub(r'(      sha256 ")[a-f0-9]*"', lambda m: f'{m.group(1)}{next(shas)}"', txt)
+          open("Formula/txt.rb", "w").write(txt)
+          PYEOF
+
+          if git diff --quiet; then
+            echo "Formula already up to date for ${VERSION}"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -am "txt ${VERSION}"
+          git push
+
+  winget:
+    needs: release
+    runs-on: windows-latest
+    steps:
+      - name: Submit Winget manifest
+        env:
+          WINGET_TOKEN: ${{ secrets.WINGET_TOKEN }}
+        shell: pwsh
+        run: |
+          $version = "${{ github.ref_name }}" -replace "^cli-v", ""
+          $exeUrl = "https://github.com/gasserp/textory-tools/releases/download/${{ github.ref_name }}/txt-windows-amd64.exe"
+          Invoke-WebRequest -Uri $exeUrl -OutFile "txt.exe" -UseBasicParsing
+          $sha256 = (Get-FileHash "txt.exe" -Algorithm SHA256).Hash
+          $d = "winget\manifests\g\Gasserp\Txt\$version"
+          New-Item -ItemType Directory -Force -Path $d | Out-Null
+          "PackageIdentifier: Gasserp.Txt`nPackageVersion: $version`nDefaultLocale: en-US`nManifestType: version`nManifestVersion: 1.6.0" | Set-Content "$d\Gasserp.Txt.yaml" -Encoding UTF8
+          "PackageIdentifier: Gasserp.Txt`nPackageVersion: $version`nPlatform:`n  - Windows.Desktop`nMinimumOSVersion: 10.0.17763.0`nInstallerType: portable`nInstallers:`n  - Architecture: x64`n    InstallerUrl: $exeUrl`n    InstallerSha256: $sha256`nManifestType: installer`nManifestVersion: 1.6.0" | Set-Content "$d\Gasserp.Txt.installer.yaml" -Encoding UTF8
+          "PackageIdentifier: Gasserp.Txt`nPackageVersion: $version`nPackageLocale: en-US`nPublisher: Philip Gasser`nPublisherUrl: https://textory.dev`nPackageName: txt`nLicense: MIT`nShortDescription: CLI for adding text snippets to textory.dev`nPackageUrl: https://textory.dev`nManifestType: defaultLocale`nManifestVersion: 1.6.0" | Set-Content "$d\Gasserp.Txt.locale.en-US.yaml" -Encoding UTF8
+          Invoke-WebRequest -Uri "https://github.com/microsoft/winget-create/releases/latest/download/wingetcreate.exe" -OutFile "wingetcreate.exe" -UseBasicParsing
+          .\wingetcreate.exe submit $d --token $env:WINGET_TOKEN --prtitle "Add Gasserp.Txt $version"
