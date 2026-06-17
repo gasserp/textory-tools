@@ -38,7 +38,114 @@ jobs:
         run: GOOS=windows GOARCH=amd64 go build -trimpath -ldflags "-s -w" -o txt-windows-amd64.exe .
         working-directory: cli
 
+      - name: Create darwin tarballs
+        run: |
+          cp cli/txt-darwin-arm64 txt && tar -czf txt-darwin-arm64.tar.gz txt && rm txt
+          cp cli/txt-darwin-amd64 txt && tar -czf txt-darwin-amd64.tar.gz txt && rm txt
+
       - name: Create release
-        run: gh release create "$GITHUB_REF_NAME" cli/txt-darwin-arm64 cli/txt-darwin-amd64 cli/txt-windows-amd64.exe --generate-notes
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            txt-darwin-arm64.tar.gz \
+            txt-darwin-amd64.tar.gz \
+            cli/txt-windows-amd64.exe \
+            --generate-notes
         env:
           GH_TOKEN: ${{ github.token }}
+
+      - name: Update Homebrew formula
+        env:
+          TAP_TOKEN: ${{ secrets.TAP_TOKEN }}
+        run: |
+          set -euo pipefail
+          VERSION="${GITHUB_REF_NAME#cli-v}"
+          SHA_ARM64=$(sha256sum txt-darwin-arm64.tar.gz | awk '{print $1}')
+          SHA_AMD64=$(sha256sum txt-darwin-amd64.tar.gz | awk '{print $1}')
+
+          git clone "https://x-access-token:${TAP_TOKEN}@github.com/gasserp/homebrew-tap.git" tap
+          cd tap
+
+          export VERSION SHA_ARM64 SHA_AMD64
+          python3 << 'PYEOF'
+          import os, re
+          v = os.environ["VERSION"]
+          arm = os.environ["SHA_ARM64"]
+          amd = os.environ["SHA_AMD64"]
+          txt = open("Formula/txt.rb").read()
+          txt = re.sub(r'(  version ")[^"]*"', f'\\g<1>{v}"', txt)
+          shas = iter([arm, amd])
+          txt = re.sub(r'(      sha256 ")[a-f0-9]*"', lambda m: f'{m.group(1)}{next(shas)}"', txt)
+          open("Formula/txt.rb", "w").write(txt)
+          PYEOF
+
+          if git diff --quiet; then
+            echo "Formula already up to date for ${VERSION}"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -am "txt ${VERSION}"
+          git push
+
+      - name: Submit Winget manifest
+        env:
+          WINGET_TOKEN: ${{ secrets.WINGET_TOKEN }}
+        run: |
+          set -euo pipefail
+          VERSION="${GITHUB_REF_NAME#cli-v}"
+          EXE_URL="https://github.com/gasserp/textory-tools/releases/download/${GITHUB_REF_NAME}/txt-windows-amd64.exe"
+          EXE_SHA256=$(sha256sum cli/txt-windows-amd64.exe | awk '{print $1}' | tr 'a-f' 'A-F')
+          MANIFEST_DIR="winget-manifests/manifests/g/Gasserp/Txt/${VERSION}"
+
+          export VERSION EXE_URL EXE_SHA256 MANIFEST_DIR
+          python3 << 'PYEOF'
+          import os
+          v = os.environ["VERSION"]
+          url = os.environ["EXE_URL"]
+          sha = os.environ["EXE_SHA256"]
+          mdir = os.environ["MANIFEST_DIR"]
+          os.makedirs(mdir, exist_ok=True)
+
+          open(f"{mdir}/Gasserp.Txt.yaml", "w").write(
+          f"PackageIdentifier: Gasserp.Txt\n"
+          f"PackageVersion: {v}\n"
+          f"DefaultLocale: en-US\n"
+          f"ManifestType: version\n"
+          f"ManifestVersion: 1.6.0\n"
+          )
+
+          open(f"{mdir}/Gasserp.Txt.installer.yaml", "w").write(
+          f"PackageIdentifier: Gasserp.Txt\n"
+          f"PackageVersion: {v}\n"
+          f"Platform:\n"
+          f"  - Windows.Desktop\n"
+          f"MinimumOSVersion: 10.0.17763.0\n"
+          f"InstallerType: portable\n"
+          f"Installers:\n"
+          f"  - Architecture: x64\n"
+          f"    InstallerUrl: {url}\n"
+          f"    InstallerSha256: {sha}\n"
+          f"ManifestType: installer\n"
+          f"ManifestVersion: 1.6.0\n"
+          )
+
+          open(f"{mdir}/Gasserp.Txt.locale.en-US.yaml", "w").write(
+          f"PackageIdentifier: Gasserp.Txt\n"
+          f"PackageVersion: {v}\n"
+          f"PackageLocale: en-US\n"
+          f"Publisher: Philip Gasser\n"
+          f"PublisherUrl: https://textory.dev\n"
+          f"PackageName: txt\n"
+          f"License: MIT\n"
+          f"ShortDescription: CLI for adding text snippets to textory.dev\n"
+          f"PackageUrl: https://textory.dev\n"
+          f"ManifestType: defaultLocale\n"
+          f"ManifestVersion: 1.6.0\n"
+          )
+          PYEOF
+
+          dotnet tool install --global Microsoft.WingetCreate
+          export PATH="$PATH:$HOME/.dotnet/tools"
+          wingetcreate submit "$MANIFEST_DIR" \
+            --token "$WINGET_TOKEN" \
+            --prtitle "Add Gasserp.Txt ${VERSION}"
