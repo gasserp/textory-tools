@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="index" />
+    <title>Textory — Privacy Policy</title>
+    <link rel="icon" href="/favicon.svg" />
+    <style>
+      :root {
+        color-scheme: dark light;
+        --bg: #0d0f12;
+        --fg: #d7dbe0;
+        --fg-dim: #8a929c;
+        --accent: #6cb6ff;
+        --border: #232830;
+      }
+      @media (prefers-color-scheme: light) {
+        :root {
+          --bg: #ffffff;
+          --fg: #1b1f24;
+          --fg-dim: #5c636c;
+          --accent: #0a66c2;
+          --border: #e3e6ea;
+        }
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--fg);
+        font: 15px/1.6 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      }
+      main {
+        max-width: 720px;
+        margin: 0 auto;
+        padding: 2.5rem 1.25rem 4rem;
+      }
+      h1 { font-size: 1.4rem; color: var(--accent); margin: 0 0 0.25rem; }
+      h2 { font-size: 1.05rem; color: var(--accent); margin: 2rem 0 0.5rem; }
+      p, li { color: var(--fg); }
+      .version { color: var(--fg-dim); font-size: 0.85rem; margin: 0 0 1.5rem; }
+      ul { padding-left: 1.4rem; }
+      li { margin: 0.4rem 0; }
+      strong { color: var(--accent); }
+      a { color: var(--accent); }
+      footer { margin-top: 3rem; color: var(--fg-dim); font-size: 0.85rem; border-top: 1px solid var(--border); padding-top: 1rem; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Textory — Privacy Policy</h1>
+      <p class="version">version 2026-06-17</p>
+
+      <p>
+        This policy explains what data the Textory apps (web, iOS, macOS, Windows, and CLI) collect, how it is
+        used, and who it is shared with. Textory is operated by the developer reachable at
+        <a href="mailto:privacy@gasserp.ch">privacy@gasserp.ch</a>, who is the controller of your data.
+      </p>
+
+      <h2>1. What we collect</h2>
+      <ul>
+        <li><strong>Account</strong> — a username and password you choose at registration (or via GitHub sign-in
+          on the web). Passwords are stored only as a salted hash, never in plain text. On native apps, a session
+          token is stored securely in the device keychain.</li>
+        <li><strong>Snippets</strong> — the title, content, tags, category, and summary of snippets you create.
+          This is content you provide; we do not scan it for advertising or profiling.</li>
+        <li><strong>Anthropic API key</strong> — optional. If you use the LLM classification or image
+          text-extraction (OCR) features, you supply your own Anthropic API key. It is encrypted at rest
+          (AES-256-GCM) and used only to make requests on your behalf.</li>
+        <li><strong>Images</strong> — when you capture or import an image for text extraction, it is sent to the
+          OCR endpoint for processing and is not retained after the text is returned.</li>
+      </ul>
+      <p>
+        We do not use third-party analytics, advertising, or tracking SDKs. We do not collect your location,
+        contacts, or device identifiers for tracking.
+      </p>
+
+      <h2>2. How we use it</h2>
+      <p>
+        Data is used solely to provide the service: to authenticate you, store and sync your snippets, enforce
+        your storage quota, and run the LLM features you explicitly invoke. We do not sell your data.
+      </p>
+
+      <h2>3. Who we share it with</h2>
+      <ul>
+        <li><strong>Microsoft Azure</strong> — hosting and storage. Account metadata and snippet content are
+          stored in Azure (Cosmos DB) as our data processor.</li>
+        <li><strong>Anthropic</strong> — when you use the classification or OCR features, the relevant snippet
+          text or image is sent to Anthropic's API using your own API key. Anthropic processes it under its own
+          terms.</li>
+      </ul>
+      <p>Admins can see account metadata (login, quota, usage) but not your snippet content in the app.</p>
+
+      <h2>4. Device permissions</h2>
+      <p>
+        On iOS/macOS, the camera and photo library are accessed only when you choose to capture or import an image
+        for text extraction. No image is uploaded unless you initiate it.
+      </p>
+
+      <h2>5. Retention &amp; deletion</h2>
+      <p>
+        Your data is retained while your account is active. You can stop using the service at any time and contact
+        <a href="mailto:privacy@gasserp.ch">privacy@gasserp.ch</a> to have your account and associated data
+        deleted.
+      </p>
+
+      <h2>6. Children</h2>
+      <p>Textory is not directed to children and is not intended for use by anyone under 16.</p>
+
+      <h2>7. Changes</h2>
+      <p>
+        We may update this policy; the version date above reflects the latest revision. Material changes will be
+        surfaced in the app.
+      </p>
+
+      <h2>8. Contact</h2>
+      <p>Questions or requests: <a href="mailto:privacy@gasserp.ch">privacy@gasserp.ch</a>.</p>
+
+      <footer>Textory · <a href="/">textory.dev</a></footer>
+    </main>
+  </body>
+</html>

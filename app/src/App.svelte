@@ -4,10 +4,12 @@
   import { isNative } from "./lib/runtime";
   import Shell from "./components/Shell.svelte";
   import Terms from "./components/Terms.svelte";
+  import Privacy from "./components/Privacy.svelte";
   import Login from "./components/Login.svelte";
   import Main from "./Main.svelte";
 
   let showTerms = $state(false);
+  let showPrivacy = $state(false);
   let acceptedTerms = $state(false);
 
   onMount(loadSession);
@@ -27,9 +29,13 @@
     <p>textory ▌ — a fast, console-style snippet manager. beta access is admin-approved.</p>
     <p>
       <button onclick={() => (showTerms = !showTerms)}>[ {showTerms ? "hide" : "view"} terms ]</button>
+      <button onclick={() => (showPrivacy = !showPrivacy)}>[ {showPrivacy ? "hide" : "view"} privacy ]</button>
     </p>
     {#if showTerms}
       <Terms />
+    {/if}
+    {#if showPrivacy}
+      <Privacy />
     {/if}
     <p class="accept">
       <label>
