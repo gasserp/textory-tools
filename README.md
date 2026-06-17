@@ -36,7 +36,7 @@ All client applications call the production API at `https://textory.dev/api`.
 
 ## CLI
 
-A tiny `txt` CLI for quickly adding snippets from macOS and Windows terminals. Generate a token in Settings, run `txt login`, then pipe text with `txt your text`, `echo x | txt`, or `txt` for interactive multiline (end with Ctrl-D on macOS or Ctrl-Z+Enter on Windows). Binaries are available from [GitHub releases](https://github.com/gasserp/textory-tools/releases) (tagged `cli-v*`) or build locally with `go build` in `cli/`. See [cli/README.md](cli/README.md) for full details.
+A tiny `txt` CLI for quickly adding snippets from macOS and Windows terminals. Generate a token in Settings, run `txt login`, then pipe text with `txt your text`, `echo x | txt`, or `txt -i` for interactive multiline (end with Ctrl-D on macOS or Ctrl-Z+Enter on Windows). Binaries are available from [GitHub releases](https://github.com/gasserp/textory-tools/releases) (tagged `cli-v*`) or build locally with `go build` in `cli/`. See [cli/README.md](cli/README.md) for full details.
 
 ## Apps
 
