@@ -98,49 +98,12 @@ jobs:
         run: |
           $version = "${{ github.ref_name }}" -replace "^cli-v", ""
           $exeUrl = "https://github.com/gasserp/textory-tools/releases/download/${{ github.ref_name }}/txt-windows-amd64.exe"
-
           Invoke-WebRequest -Uri $exeUrl -OutFile "txt.exe" -UseBasicParsing
           $sha256 = (Get-FileHash "txt.exe" -Algorithm SHA256).Hash
-
-          $manifestDir = "winget\manifests\g\Gasserp\Txt\$version"
-          New-Item -ItemType Directory -Force -Path $manifestDir | Out-Null
-
-          @"
-PackageIdentifier: Gasserp.Txt
-PackageVersion: $version
-DefaultLocale: en-US
-ManifestType: version
-ManifestVersion: 1.6.0
-"@ | Set-Content "$manifestDir\Gasserp.Txt.yaml" -Encoding UTF8
-
-          @"
-PackageIdentifier: Gasserp.Txt
-PackageVersion: $version
-Platform:
-  - Windows.Desktop
-MinimumOSVersion: 10.0.17763.0
-InstallerType: portable
-Installers:
-  - Architecture: x64
-    InstallerUrl: $exeUrl
-    InstallerSha256: $sha256
-ManifestType: installer
-ManifestVersion: 1.6.0
-"@ | Set-Content "$manifestDir\Gasserp.Txt.installer.yaml" -Encoding UTF8
-
-          @"
-PackageIdentifier: Gasserp.Txt
-PackageVersion: $version
-PackageLocale: en-US
-Publisher: Philip Gasser
-PublisherUrl: https://textory.dev
-PackageName: txt
-License: MIT
-ShortDescription: CLI for adding text snippets to textory.dev
-PackageUrl: https://textory.dev
-ManifestType: defaultLocale
-ManifestVersion: 1.6.0
-"@ | Set-Content "$manifestDir\Gasserp.Txt.locale.en-US.yaml" -Encoding UTF8
-
+          $d = "winget\manifests\g\Gasserp\Txt\$version"
+          New-Item -ItemType Directory -Force -Path $d | Out-Null
+          "PackageIdentifier: Gasserp.Txt`nPackageVersion: $version`nDefaultLocale: en-US`nManifestType: version`nManifestVersion: 1.6.0" | Set-Content "$d\Gasserp.Txt.yaml" -Encoding UTF8
+          "PackageIdentifier: Gasserp.Txt`nPackageVersion: $version`nPlatform:`n  - Windows.Desktop`nMinimumOSVersion: 10.0.17763.0`nInstallerType: portable`nInstallers:`n  - Architecture: x64`n    InstallerUrl: $exeUrl`n    InstallerSha256: $sha256`nManifestType: installer`nManifestVersion: 1.6.0" | Set-Content "$d\Gasserp.Txt.installer.yaml" -Encoding UTF8
+          "PackageIdentifier: Gasserp.Txt`nPackageVersion: $version`nPackageLocale: en-US`nPublisher: Philip Gasser`nPublisherUrl: https://textory.dev`nPackageName: txt`nLicense: MIT`nShortDescription: CLI for adding text snippets to textory.dev`nPackageUrl: https://textory.dev`nManifestType: defaultLocale`nManifestVersion: 1.6.0" | Set-Content "$d\Gasserp.Txt.locale.en-US.yaml" -Encoding UTF8
           Invoke-WebRequest -Uri "https://github.com/microsoft/winget-create/releases/latest/download/wingetcreate.exe" -OutFile "wingetcreate.exe" -UseBasicParsing
-          .\wingetcreate.exe submit $manifestDir --token $env:WINGET_TOKEN --prtitle "Add Gasserp.Txt $version"
+          .\wingetcreate.exe submit $d --token $env:WINGET_TOKEN --prtitle "Add Gasserp.Txt $version"
