@@ -1,9 +1,60 @@
 package main
 
 import (
+	"os"
 	"strings"
 	"testing"
 )
+
+// withStdin temporarily replaces os.Stdin with a regular file (not a char
+// device) holding content, so resolveContent takes its piped-input path.
+func withStdin(t *testing.T, content string, fn func()) {
+	t.Helper()
+	f, err := os.CreateTemp(t.TempDir(), "stdin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.WriteString(content); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.Seek(0, 0); err != nil {
+		t.Fatal(err)
+	}
+	orig := os.Stdin
+	os.Stdin = f
+	defer func() {
+		os.Stdin = orig
+		f.Close()
+	}()
+	fn()
+}
+
+func TestResolveContent(t *testing.T) {
+	t.Run("args joined with spaces", func(t *testing.T) {
+		got, err := resolveContent([]string{"hello", "world"}, false)
+		if err != nil || got != "hello world" {
+			t.Fatalf("got %q, err %v; want %q", got, err, "hello world")
+		}
+	})
+
+	t.Run("piped stdin read in full", func(t *testing.T) {
+		withStdin(t, "piped body\n", func() {
+			got, err := resolveContent(nil, false)
+			if err != nil || got != "piped body\n" {
+				t.Fatalf("got %q, err %v; want %q", got, err, "piped body\n")
+			}
+		})
+	})
+
+	t.Run("lone dash reads stdin", func(t *testing.T) {
+		withStdin(t, "dash body", func() {
+			got, err := resolveContent([]string{"-"}, false)
+			if err != nil || got != "dash body" {
+				t.Fatalf("got %q, err %v; want %q", got, err, "dash body")
+			}
+		})
+	})
+}
 
 func TestExtractTitle(t *testing.T) {
 	cases := []struct {

@@ -24,17 +24,21 @@ const usage = `txt - add a text snippet to textory.dev
 
 Usage:
   txt [flags] [text...]
+  txt -i
   txt login
 
 If text arguments are given, they are joined with spaces and used as the
-snippet content. Otherwise, content is read from stdin: piped/redirected
-input is read in full, or (on a terminal) read interactively until EOF.
+snippet content. Otherwise content is read from piped/redirected stdin. On
+an interactive terminal, pass -i (or a single "-" argument) to type the
+snippet, finishing with Ctrl-D (macOS/Linux) or Ctrl-Z then Enter (Windows);
+without it, txt prints this help instead of waiting for input.
 
 The title is the first non-empty line of the content, truncated to 200
 characters.
 
 Flags:
-  -b, --background   re-run in the background and return immediately
+  -b, --background    re-run in the background and return immediately
+  -i, --interactive   read the snippet interactively from the terminal
   -t <token>          API token (overrides config file and TEXTORY_TOKEN)
   -u <url>            base URL (overrides config file and TEXTORY_URL,
                       default https://textory.dev)
@@ -73,10 +77,12 @@ func run(args []string) int {
 	fs.SetOutput(os.Stderr)
 	fs.Usage = func() { fmt.Fprint(os.Stderr, usage) }
 
-	var background, quiet bool
+	var background, quiet, interactive bool
 	var tokenFlag, urlFlag string
 	fs.BoolVar(&background, "b", false, "run in the background")
 	fs.BoolVar(&background, "background", false, "run in the background")
+	fs.BoolVar(&interactive, "i", false, "read snippet interactively from the terminal")
+	fs.BoolVar(&interactive, "interactive", false, "read snippet interactively from the terminal")
 	fs.StringVar(&tokenFlag, "t", "", "API token")
 	fs.StringVar(&urlFlag, "u", "", "base URL")
 	fs.BoolVar(&quiet, "q", false, "suppress success output")
@@ -89,20 +95,19 @@ func run(args []string) int {
 		return 2
 	}
 
-	if background {
-		content, err := resolveContent(fs.Args())
-		if err != nil {
-			fmt.Fprintln(os.Stderr, "error:", err)
-			return 1
-		}
-		spawnBackground(content, tokenFlag, urlFlag)
-		return 0
-	}
-
-	content, err := resolveContent(fs.Args())
+	content, err := resolveContent(fs.Args(), interactive)
 	if err != nil {
+		if errors.Is(err, errNoInput) {
+			fs.Usage()
+			return 2
+		}
 		fmt.Fprintln(os.Stderr, "error:", err)
 		return 1
+	}
+
+	if background {
+		spawnBackground(content, tokenFlag, urlFlag)
+		return 0
 	}
 
 	title, body, err := prepareSnippet(content)
@@ -129,21 +134,41 @@ func run(args []string) int {
 	return 0
 }
 
-// resolveContent determines the raw snippet content from args or stdin,
-// per the priority order: args, piped stdin, interactive stdin.
-func resolveContent(args []string) (string, error) {
+// errNoInput is returned by resolveContent when txt is run on an interactive
+// terminal without arguments and without an explicit interactive request. The
+// caller prints usage and exits rather than blocking on a read that may never
+// see EOF (e.g. an unattended console in CI).
+var errNoInput = errors.New("no input")
+
+// resolveContent determines the raw snippet content from args or stdin, per
+// the priority order: args, piped stdin, interactive stdin. Interactive
+// reading happens only when explicitly requested (the -i flag or a lone "-"
+// argument), so a bare invocation on a terminal never blocks.
+func resolveContent(args []string, interactive bool) (string, error) {
+	// A lone "-" argument is shorthand for -i.
+	if len(args) == 1 && args[0] == "-" {
+		interactive = true
+		args = nil
+	}
+
 	if len(args) > 0 {
 		return strings.Join(args, " "), nil
 	}
 
 	stat, err := os.Stdin.Stat()
-	if err == nil && (stat.Mode()&os.ModeCharDevice) == 0 {
-		// stdin is piped or redirected: read it all.
+	isTTY := err == nil && (stat.Mode()&os.ModeCharDevice) != 0
+
+	if !isTTY {
+		// stdin is piped or redirected (or unknown): read it all.
 		data, err := io.ReadAll(os.Stdin)
 		if err != nil {
 			return "", fmt.Errorf("read stdin: %w", err)
 		}
 		return string(data), nil
+	}
+
+	if !interactive {
+		return "", errNoInput
 	}
 
 	// Interactive terminal: prompt and read until EOF.

@@ -51,7 +51,7 @@ txt Buy milk and eggs
 echo "some text" | txt
 
 # Multiline, interactive (end with Ctrl-D)
-txt
+txt -i
 
 # Run in the background and return immediately
 txt -b "note to self: ship it"
@@ -70,7 +70,7 @@ txt Buy milk and eggs
 "some text" | txt
 
 # Multiline, interactive (end with Ctrl-Z then Enter)
-txt
+txt -i
 
 # Run in the background and return immediately
 txt -b "note to self: ship it"
@@ -179,6 +179,10 @@ a `Publisher.Package` identifier (e.g. `gasserp.textory`).
 - The title is the first non-empty line of the content, trimmed and
   truncated to 200 characters (by rune, not byte).
 - Content must be 1-32768 characters; a single trailing newline is trimmed.
+- Content comes from arguments, then piped/redirected stdin. On an
+  interactive terminal, `-i` / `--interactive` (or a lone `-` argument) reads
+  the snippet until EOF; a bare `txt` on a terminal prints help and exits
+  rather than blocking on input that may never arrive.
 - `-b` / `--background` re-executes the binary detached with the resolved
   content piped to its stdin, so the shell returns instantly. Errors in
   background mode are silently dropped (there is no terminal to report
