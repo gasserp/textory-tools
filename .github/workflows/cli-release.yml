@@ -87,65 +87,60 @@ jobs:
           git commit -am "txt ${VERSION}"
           git push
 
+  winget:
+    needs: release
+    runs-on: windows-latest
+    steps:
       - name: Submit Winget manifest
         env:
           WINGET_TOKEN: ${{ secrets.WINGET_TOKEN }}
+        shell: pwsh
         run: |
-          set -euo pipefail
-          VERSION="${GITHUB_REF_NAME#cli-v}"
-          EXE_URL="https://github.com/gasserp/textory-tools/releases/download/${GITHUB_REF_NAME}/txt-windows-amd64.exe"
-          EXE_SHA256=$(sha256sum cli/txt-windows-amd64.exe | awk '{print $1}' | tr 'a-f' 'A-F')
-          MANIFEST_DIR="winget-manifests/manifests/g/Gasserp/Txt/${VERSION}"
+          $version = "${{ github.ref_name }}" -replace "^cli-v", ""
+          $exeUrl = "https://github.com/gasserp/textory-tools/releases/download/${{ github.ref_name }}/txt-windows-amd64.exe"
 
-          export VERSION EXE_URL EXE_SHA256 MANIFEST_DIR
-          python3 << 'PYEOF'
-          import os
-          v = os.environ["VERSION"]
-          url = os.environ["EXE_URL"]
-          sha = os.environ["EXE_SHA256"]
-          mdir = os.environ["MANIFEST_DIR"]
-          os.makedirs(mdir, exist_ok=True)
+          Invoke-WebRequest -Uri $exeUrl -OutFile "txt.exe" -UseBasicParsing
+          $sha256 = (Get-FileHash "txt.exe" -Algorithm SHA256).Hash
 
-          open(f"{mdir}/Gasserp.Txt.yaml", "w").write(
-          f"PackageIdentifier: Gasserp.Txt\n"
-          f"PackageVersion: {v}\n"
-          f"DefaultLocale: en-US\n"
-          f"ManifestType: version\n"
-          f"ManifestVersion: 1.6.0\n"
-          )
+          $manifestDir = "winget\manifests\g\Gasserp\Txt\$version"
+          New-Item -ItemType Directory -Force -Path $manifestDir | Out-Null
 
-          open(f"{mdir}/Gasserp.Txt.installer.yaml", "w").write(
-          f"PackageIdentifier: Gasserp.Txt\n"
-          f"PackageVersion: {v}\n"
-          f"Platform:\n"
-          f"  - Windows.Desktop\n"
-          f"MinimumOSVersion: 10.0.17763.0\n"
-          f"InstallerType: portable\n"
-          f"Installers:\n"
-          f"  - Architecture: x64\n"
-          f"    InstallerUrl: {url}\n"
-          f"    InstallerSha256: {sha}\n"
-          f"ManifestType: installer\n"
-          f"ManifestVersion: 1.6.0\n"
-          )
+          @"
+PackageIdentifier: Gasserp.Txt
+PackageVersion: $version
+DefaultLocale: en-US
+ManifestType: version
+ManifestVersion: 1.6.0
+"@ | Set-Content "$manifestDir\Gasserp.Txt.yaml" -Encoding UTF8
 
-          open(f"{mdir}/Gasserp.Txt.locale.en-US.yaml", "w").write(
-          f"PackageIdentifier: Gasserp.Txt\n"
-          f"PackageVersion: {v}\n"
-          f"PackageLocale: en-US\n"
-          f"Publisher: Philip Gasser\n"
-          f"PublisherUrl: https://textory.dev\n"
-          f"PackageName: txt\n"
-          f"License: MIT\n"
-          f"ShortDescription: CLI for adding text snippets to textory.dev\n"
-          f"PackageUrl: https://textory.dev\n"
-          f"ManifestType: defaultLocale\n"
-          f"ManifestVersion: 1.6.0\n"
-          )
-          PYEOF
+          @"
+PackageIdentifier: Gasserp.Txt
+PackageVersion: $version
+Platform:
+  - Windows.Desktop
+MinimumOSVersion: 10.0.17763.0
+InstallerType: portable
+Installers:
+  - Architecture: x64
+    InstallerUrl: $exeUrl
+    InstallerSha256: $sha256
+ManifestType: installer
+ManifestVersion: 1.6.0
+"@ | Set-Content "$manifestDir\Gasserp.Txt.installer.yaml" -Encoding UTF8
 
-          dotnet tool install --global Microsoft.WingetCreate
-          export PATH="$PATH:$HOME/.dotnet/tools"
-          wingetcreate submit "$MANIFEST_DIR" \
-            --token "$WINGET_TOKEN" \
-            --prtitle "Add Gasserp.Txt ${VERSION}"
+          @"
+PackageIdentifier: Gasserp.Txt
+PackageVersion: $version
+PackageLocale: en-US
+Publisher: Philip Gasser
+PublisherUrl: https://textory.dev
+PackageName: txt
+License: MIT
+ShortDescription: CLI for adding text snippets to textory.dev
+PackageUrl: https://textory.dev
+ManifestType: defaultLocale
+ManifestVersion: 1.6.0
+"@ | Set-Content "$manifestDir\Gasserp.Txt.locale.en-US.yaml" -Encoding UTF8
+
+          Invoke-WebRequest -Uri "https://github.com/microsoft/winget-create/releases/latest/download/wingetcreate.exe" -OutFile "wingetcreate.exe" -UseBasicParsing
+          .\wingetcreate.exe submit $manifestDir --token $env:WINGET_TOKEN --prtitle "Add Gasserp.Txt $version"
