@@ -41,6 +41,7 @@
 
   <footer class="shell-footer">
     <span>/ search &middot; ctrl+k opens palette &middot; ? help</span>
+    <a class="footer-link" href="/privacy.html" target="_blank" rel="noopener">privacy</a>
   </footer>
 
   {#if toastState.current}
@@ -104,10 +105,23 @@
   }
 
   .shell-footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--sp-3);
     padding: var(--sp-2) var(--sp-3);
     border-top: 1px solid var(--border);
     color: var(--fg-dim);
     font-size: 0.85em;
+  }
+
+  .footer-link {
+    color: var(--fg-dim);
+    text-decoration: none;
+  }
+
+  .footer-link:hover {
+    color: var(--accent);
   }
 
   .toast {
