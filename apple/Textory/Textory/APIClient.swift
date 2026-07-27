@@ -64,6 +64,20 @@ final class APIClient {
         let password: String
     }
 
+    private struct VerifyRequest: Encodable {
+        let challenge: String
+        let code: String
+    }
+
+    /// Reports whether the server supports web password login and 2FA.
+    ///
+    /// Unauthenticated and side-effect free. Callers treat any failure as
+    /// `Capabilities.unsupported` (contract §1) rather than propagating it —
+    /// this endpoint 404s on a backend that predates 2FA.
+    func capabilities() async throws -> Capabilities {
+        try await sendNoBody("GET", "/api/auth/capabilities")
+    }
+
     func register(username: String, password: String, acceptTerms: Bool) async throws -> AuthResponse {
         try await send(
             "POST", "/api/auth/register",
@@ -71,10 +85,25 @@ final class APIClient {
         )
     }
 
-    func login(username: String, password: String) async throws -> AuthResponse {
+    /// Step 1 of password login. May return a session or a 2FA challenge —
+    /// see `LoginResponse`.
+    func login(username: String, password: String) async throws -> LoginResponse {
         try await send(
             "POST", "/api/auth/login",
             body: LoginRequest(username: username, password: password)
+        )
+    }
+
+    /// Step 2 of password login: exchange a challenge plus a second factor for
+    /// a session (contract §2.3).
+    ///
+    /// `code` is a 6-digit TOTP code or a recovery code. The native route is
+    /// token-issuing and sends no cookie; there is no `Origin` requirement,
+    /// because native clients have none to send.
+    func verifyTwoFactor(challenge: String, code: String) async throws -> AuthResponse {
+        try await send(
+            "POST", "/api/auth/2fa/verify",
+            body: VerifyRequest(challenge: challenge, code: code)
         )
     }
 

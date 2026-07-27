@@ -124,8 +124,18 @@ The cookie clear is not sufficient on its own — the session must be revoked se
 
 `POST /api/auth/login` and `POST /api/auth/register` keep returning `{ token, user }`
 **until native clients ship updates**. See [Rollout](#6-rollout) — changing their shape
-early bricks every installed iOS/macOS and desktop app
-(`apple/Textory/Textory/Models.swift` decodes `AuthResponse { token, user }`).
+early bricks every installed iOS/macOS and desktop app.
+
+The clients in this repo now decode both shapes: `apple/Textory/Textory/Models.swift`
+has `LoginResponse`, a sum type over `{ token, user }` and
+`{ status: "mfa_required", challenge, expiresIn }`, and the shared web/desktop store
+branches on the same distinction (`app/src/lib/stores.svelte.ts`). That closes the
+*source* half of the constraint only. The sequencing in [Rollout](#6-rollout) still
+holds, because what breaks at `MFA_MODE=required` is whatever build a user has
+**installed** — landing this code is step 3's precondition, not step 3.
+
+`/api/auth/register` is unchanged and still returns `{ token, user }` unconditionally:
+a brand-new account has no factor, so there is nothing to challenge.
 
 `/api/auth/register` creates an account with **no** TOTP factor, so there is nothing to
 challenge. It must return a session that is `mfaSatisfied: false` and therefore walled
@@ -280,8 +290,10 @@ This is the largest user-visible effect of this change.
 1. **`mfa: "optional"`** — server support ships; Settings offers voluntary enrolment.
    No wall.
 2. **Announce a date.** Unenrolled users see a dismissible banner.
-3. **Ship native client updates** (Apple, desktop, CLI) that understand the challenge
-   flow via §2.3, and give users time to install them.
+3. **Ship native client updates** (Apple, desktop) that understand the challenge
+   flow via §2.3, and give users time to install them. The CLI needs no update: it
+   authenticates with a `txt_` token and never posts a password, and CLI tokens are
+   exempt from the gate by design (§4).
 4. **`mfa: "required"`** — the wall becomes blocking, and legacy `/api/auth/login` may
    start returning challenges.
 

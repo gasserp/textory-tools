@@ -10,6 +10,19 @@ struct RootView: View {
             ProgressView()
         case .anonymous:
             LoginView(authStore: authStore)
+        case .awaitingSecondFactor:
+            TwoFactorView(authStore: authStore)
+        case .mfaEnrollmentRequired:
+            // No enrolment UI here yet: setting up a factor means displaying a
+            // secret and a set of recovery codes exactly once, which is the web
+            // app's job today. Until that ships natively this is a signpost
+            // rather than a dead end with a stack of "mfa required" errors
+            // behind it.
+            StatusMessageView(
+                title: "Two-factor setup required",
+                message: "This account needs two-factor authentication before it can be used. Set it up at textory.dev, then sign in again.",
+                authStore: authStore
+            )
         case .pending:
             StatusMessageView(
                 title: "Awaiting approval",
