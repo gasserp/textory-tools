@@ -31,6 +31,15 @@
   // sign-out control of their own.
   const showLogout = $derived(isNative || currentCapabilities().webPasswordLogin);
 
+  /**
+   * The server says a factor already exists, so this tab's `me` was stale and the user
+   * belongs on the step-up screen, not enrolment. Refreshing re-evaluates the branch
+   * above; without it the retry button re-requests enrolment and 409s forever.
+   */
+  async function onEnrollStartFailed(message: string): Promise<void> {
+    if (message === "2fa already enabled") await loadSession();
+  }
+
   onMount(loadSession);
 </script>
 
@@ -60,6 +69,7 @@
         onDone={completeMfaEnrollment}
         onCancel={logout}
         cancelLabel="sign out"
+        onStartFailed={onEnrollStartFailed}
       />
     {/if}
   {:else if session.status === "unregistered"}

@@ -70,8 +70,29 @@ setAuthErrorHandler((status, error) => {
     // The server flipped to enforcing while this tab was open. Without this the app
     // would just spray 403 toasts over a screen the user can no longer use.
     session.status = "mfa_enrollment";
+    // `session.user` is from before the flip, so `mfaEnabled` may be stale and decide
+    // the wrong wall — enrolment for someone who already has a factor is a dead end.
+    // /me is on the server's allowlist, so this cannot 403 back into here.
+    void refreshUser();
   }
 });
+
+let refreshingUser = false;
+
+/** Re-reads /me without touching session.status. Guarded against re-entry. */
+async function refreshUser(): Promise<void> {
+  if (refreshingUser) return;
+  refreshingUser = true;
+  try {
+    const me = await apiFetch<MeResponse>("/me", { skipAuthHandler: true });
+    if (me.status !== "unregistered") session.user = me;
+  } catch {
+    // Best-effort: the wall is already up, and a failed refresh just leaves the
+    // status quo rather than making things worse.
+  } finally {
+    refreshingUser = false;
+  }
+}
 
 export async function loadSession(): Promise<void> {
   await loadCapabilities();

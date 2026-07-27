@@ -27,6 +27,10 @@
   // "enroll" and "replace" both mount TwoFactorSetup; they differ only in endpoints.
   let factorFlow: "none" | "enroll" | "replace" = $state("none");
   let rotateCode = $state("");
+  // True while TwoFactorSetup has recovery codes on screen. Closing the overlay then
+  // destroys the only copy the user will ever be shown, and the previous set has
+  // already been invalidated server-side.
+  let factorCodesVisible = $state(false);
   // Proof of identity for the credential-minting actions. Kept per-action rather than
   // shared so that typing a code for one does not silently authorise another.
   let cliReauth = $state("");
@@ -224,8 +228,25 @@
 
   function endFactorFlow(): void {
     factorFlow = "none";
+    factorCodesVisible = false;
     rotateCode = "";
     mfaCode = "";
+  }
+
+  /**
+   * A failed start has no useful retry: the code the user already submitted is either
+   * wrong or spent (the server records accepted codes to block replay), and a TOTP
+   * code expires within a step anyway. Drop back to the input so they can enter a
+   * fresh one.
+   *
+   * Enrolment has no such input — its start takes no code — so it keeps the retry.
+   */
+  function onFactorStartFailed(message: string): void {
+    if (factorFlow !== "replace") return;
+    factorFlow = "none";
+    factorCodesVisible = false;
+    rotateCode = "";
+    showToast(message === "invalid code" ? "invalid code — enter a fresh one" : message);
   }
 
   function formatDate(dateString: string): string {
@@ -243,19 +264,61 @@
     }
   }
 
+  /** Recovery codes on screen — closing now loses them for good. */
+  const dismissBlocked = $derived(factorCodesVisible || freshRecoveryCodes.length > 0);
+
+  function tryClose(): void {
+    if (dismissBlocked) {
+      showToast("save your recovery codes first");
+      return;
+    }
+    closeOverlays();
+  }
+
+  /**
+   * Keeps focus inside the dialog without disabling Tab.
+   *
+   * The previous handler swallowed Tab entirely, which made every control in here
+   * unreachable by keyboard — including, since this change, the whole two-factor
+   * setup flow.
+   */
+  function trapFocus(e: KeyboardEvent): void {
+    const focusable = dialogEl?.querySelectorAll<HTMLElement>(
+      'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+    );
+    if (!focusable || focusable.length === 0) return;
+
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    const active = document.activeElement;
+
+    if (e.shiftKey && (active === first || active === dialogEl)) {
+      e.preventDefault();
+      last.focus();
+    } else if (!e.shiftKey && active === last) {
+      e.preventDefault();
+      first.focus();
+    }
+  }
+
   function onKeydown(e: KeyboardEvent): void {
     if (e.key === "Escape") {
       e.preventDefault();
-      closeOverlays();
+      // Shell registers a global Escape -> closeOverlays on window. Without stopping
+      // propagation here the event reaches it after tryClose() has declined, and the
+      // overlay closes anyway — taking the recovery codes with it. preventDefault
+      // alone does not help: that binding does not check defaultPrevented.
+      e.stopPropagation();
+      tryClose();
     } else if (e.key === "Tab") {
-      e.preventDefault();
+      trapFocus(e);
     }
   }
 </script>
 
 <!-- svelte-ignore a11y_click_events_have_key_events -->
 <!-- svelte-ignore a11y_no_static_element_interactions -->
-<div class="overlay-backdrop" onclick={closeOverlays}>
+<div class="overlay-backdrop" onclick={tryClose}>
   <div
     class="settings"
     bind:this={dialogEl}
@@ -326,10 +389,12 @@
       </div>
     {:else}
       <p class="hint">token for the txt command-line tool</p>
-      <p class="hint">
-        a cli token bypasses two-factor authentication by design, so minting one needs
-        your {proofLabel}.
-      </p>
+      {#if needsProof}
+        <p class="hint">
+          a cli token bypasses two-factor authentication by design, so minting one needs
+          your {proofLabel}.
+        </p>
+      {/if}
       {#if needsProof}
         <div class="field">
           <input
@@ -372,6 +437,8 @@
           finish={factorFlow === "replace" ? activateReplacement : activateTwoFactor}
           onDone={endFactorFlow}
           onCancel={endFactorFlow}
+          onStartFailed={onFactorStartFailed}
+          bind:codesVisible={factorCodesVisible}
         />
       {:else if mfaEnabled}
         {#if recoveryRemaining != null}
@@ -422,15 +489,16 @@
             keeps working until the new one is confirmed.
           </p>
           <div class="field">
+            <!-- No numeric inputmode: the audience for rotation includes people whose
+                 phone is gone, and the server accepts a recovery code here too. -->
             <input
               bind:value={rotateCode}
               type="text"
-              inputmode="numeric"
               autocomplete="one-time-code"
               maxlength="40"
-              placeholder="current code"
+              placeholder="current authenticator or recovery code"
               spellcheck="false"
-              aria-label="Current authenticator code"
+              aria-label="Current authenticator or recovery code"
               disabled={mfaBusy}
             />
             <button onclick={() => beginFactorFlow("replace")} disabled={!rotateCode.trim() || mfaBusy}>

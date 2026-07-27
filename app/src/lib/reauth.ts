@@ -21,11 +21,6 @@ export function reauthKind(user: MeUser | null): ReauthKind {
   return "none";
 }
 
-/** Whether the user has to type something before an action can proceed. */
-export function reauthRequired(user: MeUser | null): boolean {
-  return reauthKind(user) !== "none";
-}
-
 /**
  * Builds the request body fragment for a re-auth challenge.
  *
@@ -40,5 +35,10 @@ export function reauthPayload(kind: ReauthKind, value: string): ReauthPayload {
 }
 
 export function reauthLabel(kind: ReauthKind): string {
-  return kind === "code" ? "authenticator or recovery code" : "current password";
+  if (kind === "code") return "authenticator or recovery code";
+  if (kind === "password") return "current password";
+  // Every GitHub-SSO account with no password lands here — which is currently the
+  // whole web user base. Naming a credential they do not have sends them hunting for
+  // a password that does not exist.
+  return "signed-in session";
 }

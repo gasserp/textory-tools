@@ -17,6 +17,8 @@
     onDone,
     onCancel,
     cancelLabel = "cancel",
+    onStartFailed,
+    codesVisible = $bindable(false),
   }: {
     title: string;
     start: () => Promise<EnrollResponse>;
@@ -24,6 +26,20 @@
     onDone: () => void;
     onCancel?: () => void;
     cancelLabel?: string;
+    /**
+     * Called instead of rendering the retry screen when start() fails. Retrying is
+     * useless where the caller's input is already spent — a TOTP code that has been
+     * submitted once is either wrong or claimed in the server's replay ledger, so the
+     * caller needs to collect a fresh one.
+     */
+    onStartFailed?: (message: string) => void;
+    /**
+     * Lets a host block its own dismiss affordances while the codes are on screen.
+     * The component hides its cancel button then, but an overlay that closes on Esc
+     * or a backdrop click would still discard codes that are the account's only way
+     * back in — and by this point the previous set is already invalid server-side.
+     */
+    codesVisible?: boolean;
   } = $props();
 
   let secret = $state("");
@@ -37,6 +53,10 @@
   let submitting = $state(false);
 
   const showingCodes = $derived(recoveryCodes.length > 0);
+
+  $effect(() => {
+    codesVisible = showingCodes;
+  });
 
   /**
    * Build an SVG path from the QR matrix.
@@ -74,7 +94,9 @@
       qrSize = qr.size + QUIET_ZONE * 2;
       qrPath = buildPath(qr.data);
     } catch (e) {
-      showToast(e instanceof Error ? e.message : "could not start setup");
+      const message = e instanceof Error ? e.message : "could not start setup";
+      showToast(message);
+      onStartFailed?.(message);
     } finally {
       loading = false;
     }
@@ -85,14 +107,22 @@
     if (!entered || submitting) return;
     submitting = true;
     try {
-      recoveryCodes = await finish(entered);
+      const issued = await finish(entered);
+      if (!Array.isArray(issued) || issued.length === 0) {
+        throw new Error("two-factor is enabled, but the recovery codes could not be shown — generate a new set in settings");
+      }
+      recoveryCodes = issued;
       // The pending secret is dead once activated; don't keep it around.
       secret = "";
       otpauthUri = "";
       qrPath = "";
       code = "";
-    } catch {
-      showToast("invalid code");
+    } catch (e) {
+      // Only a genuine rejection is "invalid code". Anything else (notably the
+      // codes-missing case above) would otherwise send the user round a retry loop
+      // that cannot succeed, because the factor is already active.
+      const message = e instanceof Error ? e.message : "";
+      showToast(message.includes("recovery codes") ? message : "invalid code");
     } finally {
       submitting = false;
     }

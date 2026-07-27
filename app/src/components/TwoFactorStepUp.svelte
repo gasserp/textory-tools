@@ -1,5 +1,6 @@
 <script lang="ts">
-  import { logout, stepUpTwoFactor } from "../lib/stores.svelte";
+  import { loadSession, logout, stepUpTwoFactor } from "../lib/stores.svelte";
+  import { isNative } from "../lib/runtime";
   import { showToast } from "../lib/toast.svelte";
 
   /**
@@ -24,13 +25,40 @@
       code = "";
     } catch (e) {
       const message = e instanceof Error ? e.message : "";
-      showToast(message === "too many attempts" ? message : "invalid code");
+      // Only a real rejection may present as "invalid code". The step-up route
+      // authenticates purely by the SWA principal, so a session that has lost one —
+      // or never had one — fails here for reasons that have nothing to do with the
+      // code. Reporting those as "invalid code" is how people conclude their
+      // authenticator is broken and start spending recovery codes on a route that
+      // was never going to accept them.
+      if (message === "not signed in" || message === "bad origin") {
+        showToast("your sign-in expired — sign in again to continue");
+        await logout();
+      } else if (message === "2fa not enabled") {
+        // The factor went away underneath us (an admin reset, most likely). Refresh
+        // and let App route to enrolment.
+        await loadSession();
+      } else {
+        showToast(message === "too many attempts" ? message : "invalid code");
+      }
     } finally {
       submitting = false;
     }
   }
 </script>
 
+{#if isNative}
+  <div class="stepup">
+    <h2>two-factor authentication required</h2>
+    <p>
+      sign in again to verify your authenticator — this app signs in with a token, and
+      the code is checked as part of that.
+    </p>
+    <div class="actions">
+      <button type="button" onclick={logout}>[ sign out ]</button>
+    </div>
+  </div>
+{:else}
 <form class="stepup" onsubmit={(e) => { e.preventDefault(); submit(); }}>
   <h2>two-factor authentication required</h2>
   <p>
@@ -69,10 +97,11 @@
   </div>
 
   <p class="hint">
-    lost your authenticator and your recovery codes? an administrator has to reset the
-    factor on your account.
+    verifying here signs out your other devices. lost your authenticator and your
+    recovery codes? an administrator has to reset the factor on your account.
   </p>
 </form>
+{/if}
 
 <style>
   .stepup {
