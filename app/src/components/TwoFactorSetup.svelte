@@ -1,7 +1,30 @@
 <script lang="ts">
-  import { activateTwoFactor, completeMfaEnrollment, enrollTwoFactor, logout } from "../lib/stores.svelte";
+  import type { EnrollResponse } from "../lib/stores.svelte";
   import { showToast } from "../lib/toast.svelte";
   import { copyPlain } from "../lib/clipboard";
+
+  /**
+   * Shared by three flows that are the same six steps with different endpoints:
+   * the enrolment wall, voluntary enrolment from Settings, and moving to a new
+   * authenticator. The caller supplies start/finish so this component never has to
+   * know which it is — and so the "save your recovery codes" screen, the part that
+   * locks people out when it is skipped, cannot be forgotten by one of them.
+   */
+  let {
+    title,
+    start,
+    finish,
+    onDone,
+    onCancel,
+    cancelLabel = "cancel",
+  }: {
+    title: string;
+    start: () => Promise<EnrollResponse>;
+    finish: (code: string) => Promise<string[]>;
+    onDone: () => void;
+    onCancel?: () => void;
+    cancelLabel?: string;
+  } = $props();
 
   let secret = $state("");
   let otpauthUri = $state("");
@@ -41,7 +64,7 @@
   async function begin(): Promise<void> {
     loading = true;
     try {
-      const response = await enrollTwoFactor();
+      const response = await start();
       if (!response?.secret || !response?.otpauthUri) throw new Error("could not start setup");
       secret = response.secret;
       otpauthUri = response.otpauthUri;
@@ -62,7 +85,7 @@
     if (!entered || submitting) return;
     submitting = true;
     try {
-      recoveryCodes = await activateTwoFactor(entered);
+      recoveryCodes = await finish(entered);
       // The pending secret is dead once activated; don't keep it around.
       secret = "";
       otpauthUri = "";
@@ -89,7 +112,7 @@
 </script>
 
 <div class="setup">
-  <h2>two-factor authentication required</h2>
+  <h2>{title}</h2>
 
   {#if showingCodes}
     <p>save these recovery codes. each works once, and they are the only way back in if you lose your authenticator.</p>
@@ -117,7 +140,7 @@
       </label>
     </p>
     <div class="actions">
-      <button disabled={!acknowledged} onclick={() => { recoveryCodes = []; completeMfaEnrollment(); }}>[ continue ]</button>
+      <button disabled={!acknowledged} onclick={() => { recoveryCodes = []; onDone(); }}>[ continue ]</button>
     </div>
   {:else if loading}
     <p>setting up…</p>
@@ -167,9 +190,9 @@
     </div>
   {/if}
 
-  {#if !showingCodes}
+  {#if !showingCodes && onCancel}
     <div class="actions">
-      <button class="link" onclick={logout}>[ sign out ]</button>
+      <button class="link" onclick={onCancel}>[ {cancelLabel} ]</button>
     </div>
   {/if}
 </div>

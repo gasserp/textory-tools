@@ -1,6 +1,14 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { loadSession, logout, requestAccess, session } from "./lib/stores.svelte";
+  import {
+    activateTwoFactor,
+    completeMfaEnrollment,
+    enrollTwoFactor,
+    loadSession,
+    logout,
+    requestAccess,
+    session,
+  } from "./lib/stores.svelte";
   import { currentCapabilities } from "./lib/capabilities";
   import { isNative } from "./lib/runtime";
   import Shell from "./components/Shell.svelte";
@@ -8,6 +16,8 @@
   import Privacy from "./components/Privacy.svelte";
   import Login from "./components/Login.svelte";
   import TwoFactorSetup from "./components/TwoFactorSetup.svelte";
+  import TwoFactorStepUp from "./components/TwoFactorStepUp.svelte";
+  import EnrollBanner from "./components/EnrollBanner.svelte";
   import Main from "./Main.svelte";
 
   let showTerms = $state(false);
@@ -37,7 +47,21 @@
     {/if}
   {:else if session.status === "mfa_enrollment"}
     <!-- Must precede "approved": otherwise an unenrolled user just reloads into the app. -->
-    <TwoFactorSetup />
+    {#if session.user?.mfaEnabled}
+      <!-- Already has a factor, this session just hasn't proved it (every GitHub-SSO
+           session, always). Sending them to enrolment would dead-end: /2fa/enroll
+           refuses while a factor is active. -->
+      <TwoFactorStepUp />
+    {:else}
+      <TwoFactorSetup
+        title="two-factor authentication required"
+        start={enrollTwoFactor}
+        finish={activateTwoFactor}
+        onDone={completeMfaEnrollment}
+        onCancel={logout}
+        cancelLabel="sign out"
+      />
+    {/if}
   {:else if session.status === "unregistered"}
     <p>textory ▌ — a fast, console-style snippet manager. beta access is admin-approved.</p>
     <p>
@@ -73,6 +97,7 @@
         <button onclick={logout}>[ log out ]</button>
       </div>
     {/if}
+    <EnrollBanner />
     <Main />
   {:else}
     <!-- Catch-all: an unrecognised status must not render a blank page. -->

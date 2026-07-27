@@ -1,10 +1,12 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { closeOverlays } from "../lib/overlay.svelte";
-  import { session, saveAnthropicKey, deleteAnthropicKey, setAutoClassify, generateCliToken, regenerateCliToken, revokeCliToken, setPassword, clearPassword, disableTwoFactor, regenerateRecoveryCodes } from "../lib/stores.svelte";
+  import { session, saveAnthropicKey, deleteAnthropicKey, setAutoClassify, generateCliToken, regenerateCliToken, revokeCliToken, setPassword, clearPassword, disableTwoFactor, regenerateRecoveryCodes, enrollTwoFactor, activateTwoFactor, replaceTwoFactor, activateReplacement } from "../lib/stores.svelte";
   import { currentCapabilities } from "../lib/capabilities";
+  import { reauthKind, reauthLabel, reauthPayload } from "../lib/reauth";
   import { showToast } from "../lib/toast.svelte";
   import { copyPlain } from "../lib/clipboard";
+  import TwoFactorSetup from "./TwoFactorSetup.svelte";
 
   let dialogEl: HTMLDivElement | undefined = $state();
   let inputEl: HTMLInputElement | undefined = $state();
@@ -22,6 +24,14 @@
   let mfaCode = $state("");
   let mfaBusy = $state(false);
   let freshRecoveryCodes: string[] = $state([]);
+  // "enroll" and "replace" both mount TwoFactorSetup; they differ only in endpoints.
+  let factorFlow: "none" | "enroll" | "replace" = $state("none");
+  let rotateCode = $state("");
+  // Proof of identity for the credential-minting actions. Kept per-action rather than
+  // shared so that typing a code for one does not silently authorise another.
+  let cliReauth = $state("");
+  let setPasswordReauth = $state("");
+  let removePasswordReauth = $state("");
 
   const MIN_PASSWORD_LENGTH = 10;
   const passwordTooShort = $derived(
@@ -37,6 +47,15 @@
   const hasCliToken = $derived(session.user?.cliTokenCreatedAt != null);
   const cliTokenCreatedAt = $derived(session.user?.cliTokenCreatedAt);
   const hasPassword = $derived(session.user?.hasPassword ?? false);
+
+  /**
+   * What the server will accept as proof for a credential change: a code when a factor
+   * is active, otherwise the current password, otherwise nothing (a GitHub-SSO account
+   * with neither has no second thing to prove).
+   */
+  const proof = $derived(reauthKind(session.user));
+  const proofLabel = $derived(reauthLabel(proof));
+  const needsProof = $derived(proof !== "none");
 
   onMount(() => {
     const previousFocus = document.activeElement as HTMLElement | null;
@@ -83,13 +102,15 @@
     }
   }
 
-  async function generateToken(): Promise<void> {
-    if (cliGenerating) return;
+  async function mintToken(regenerating: boolean): Promise<void> {
+    if (cliGenerating || (needsProof && !cliReauth.trim())) return;
     cliGenerating = true;
     try {
-      const response = await generateCliToken();
+      const mint = regenerating ? regenerateCliToken : generateCliToken;
+      const response = await mint(reauthPayload(proof, cliReauth));
       cliToken = response.token;
-      showToast("token generated");
+      cliReauth = "";
+      showToast(regenerating ? "token regenerated" : "token generated");
     } catch (e) {
       showToast(e instanceof Error ? e.message : "generate failed");
     } finally {
@@ -97,19 +118,8 @@
     }
   }
 
-  async function regenerateToken(): Promise<void> {
-    if (cliGenerating) return;
-    cliGenerating = true;
-    try {
-      const response = await regenerateCliToken();
-      cliToken = response.token;
-      showToast("token regenerated");
-    } catch (e) {
-      showToast(e instanceof Error ? e.message : "regenerate failed");
-    } finally {
-      cliGenerating = false;
-    }
-  }
+  const generateToken = () => mintToken(false);
+  const regenerateToken = () => mintToken(true);
 
   async function revokeToken(): Promise<void> {
     if (cliRevoking) return;
@@ -157,16 +167,24 @@
 
   async function savePassword(): Promise<void> {
     if (!passwordUsername.trim() || !passwordValue.trim() || passwordSaving) return;
+    if (needsProof && !setPasswordReauth.trim()) return;
     if (passwordValue.length < MIN_PASSWORD_LENGTH) {
       showToast(`password must be at least ${MIN_PASSWORD_LENGTH} characters`);
       return;
     }
     passwordSaving = true;
     try {
-      await setPassword(passwordUsername.trim(), passwordValue);
+      await setPassword(
+        passwordUsername.trim(),
+        passwordValue,
+        reauthPayload(proof, setPasswordReauth),
+      );
       passwordUsername = "";
       passwordValue = "";
-      showToast("password configured");
+      setPasswordReauth = "";
+      // Every other session was just invalidated, so say so — otherwise the user
+      // discovers it when their phone signs itself out.
+      showToast("password configured — other sessions signed out");
     } catch (e) {
       showToast(e instanceof Error ? e.message : "save failed");
     } finally {
@@ -176,15 +194,38 @@
 
   async function removePassword(): Promise<void> {
     if (passwordRemoving) return;
+    if (needsProof && !removePasswordReauth.trim()) return;
     passwordRemoving = true;
     try {
-      await clearPassword();
+      await clearPassword(reauthPayload(proof, removePasswordReauth));
+      removePasswordReauth = "";
       showToast("password removed");
     } catch (e) {
       showToast(e instanceof Error ? e.message : "delete failed");
     } finally {
       passwordRemoving = false;
     }
+  }
+
+  /**
+   * Rotating to a new authenticator. Two steps: prove the current factor to get a
+   * pending secret, then prove the new one to swap it in. The old factor stays valid
+   * throughout, so a mistyped key is recoverable instead of a lockout.
+   */
+  function startRotation(): Promise<{ secret: string; otpauthUri: string; expiresIn: number }> {
+    return replaceTwoFactor(rotateCode.replace(/\s/g, ""));
+  }
+
+  function beginFactorFlow(flow: "enroll" | "replace"): void {
+    if (flow === "replace" && !rotateCode.trim()) return;
+    freshRecoveryCodes = [];
+    factorFlow = flow;
+  }
+
+  function endFactorFlow(): void {
+    factorFlow = "none";
+    rotateCode = "";
+    mfaCode = "";
   }
 
   function formatDate(dateString: string): string {
@@ -285,12 +326,30 @@
       </div>
     {:else}
       <p class="hint">token for the txt command-line tool</p>
+      <p class="hint">
+        a cli token bypasses two-factor authentication by design, so minting one needs
+        your {proofLabel}.
+      </p>
+      {#if needsProof}
+        <div class="field">
+          <input
+            bind:value={cliReauth}
+            type={proof === "code" ? "text" : "password"}
+            inputmode={proof === "code" ? "numeric" : undefined}
+            autocomplete={proof === "code" ? "one-time-code" : "current-password"}
+            placeholder={proofLabel}
+            spellcheck="false"
+            aria-label={proofLabel}
+            disabled={cliGenerating || cliRevoking}
+          />
+        </div>
+      {/if}
       <div class="field">
         {#if hasCliToken}
-          <button onclick={regenerateToken} disabled={cliGenerating || cliRevoking}>[ regenerate ]</button>
+          <button onclick={regenerateToken} disabled={cliGenerating || cliRevoking || (needsProof && !cliReauth.trim())}>[ regenerate ]</button>
           <button onclick={revokeToken} disabled={cliGenerating || cliRevoking}>[ revoke ]</button>
         {:else}
-          <button onclick={generateToken} disabled={cliGenerating}>[ generate token ]</button>
+          <button onclick={generateToken} disabled={cliGenerating || (needsProof && !cliReauth.trim())}>[ generate token ]</button>
         {/if}
       </div>
       {#if hasCliToken}
@@ -306,7 +365,15 @@
         </span>
       </div>
 
-      {#if mfaEnabled}
+      {#if factorFlow !== "none"}
+        <TwoFactorSetup
+          title={factorFlow === "replace" ? "move to a new authenticator" : "set up two-factor authentication"}
+          start={factorFlow === "replace" ? startRotation : enrollTwoFactor}
+          finish={factorFlow === "replace" ? activateReplacement : activateTwoFactor}
+          onDone={endFactorFlow}
+          onCancel={endFactorFlow}
+        />
+      {:else if mfaEnabled}
         {#if recoveryRemaining != null}
           <p class="hint">{recoveryRemaining} recovery code{recoveryRemaining === 1 ? "" : "s"} remaining</p>
         {/if}
@@ -323,17 +390,21 @@
             <button onclick={() => (freshRecoveryCodes = [])}>[ done ]</button>
           </div>
         {:else}
-          <p class="hint">enter a current authenticator code to make changes</p>
+          <p class="hint">enter a current authenticator or recovery code to make changes</p>
           <div class="field">
+            <!-- Not maxlength=7: recovery codes are valid here too (contract §2.4) and
+                 are far longer, so a numeric-width cap would silently make them
+                 untypeable. The extra headroom over the code length also means a
+                 pasted code with a stray space is not truncated before the handler
+                 strips it. -->
             <input
               bind:value={mfaCode}
               type="text"
-              inputmode="numeric"
               autocomplete="one-time-code"
-              maxlength="7"
+              maxlength="40"
               placeholder="000000"
               spellcheck="false"
-              aria-label="Authenticator code"
+              aria-label="Authenticator or recovery code"
               disabled={mfaBusy}
             />
             <button onclick={regenerateCodes} disabled={!mfaCode.trim() || mfaBusy}>[ new recovery codes ]</button>
@@ -345,13 +416,37 @@
           {:else}
             <p class="hint">two-factor authentication is required and cannot be disabled</p>
           {/if}
+
+          <p class="hint">
+            got a new phone? rotate without losing access — the current authenticator
+            keeps working until the new one is confirmed.
+          </p>
+          <div class="field">
+            <input
+              bind:value={rotateCode}
+              type="text"
+              inputmode="numeric"
+              autocomplete="one-time-code"
+              maxlength="40"
+              placeholder="current code"
+              spellcheck="false"
+              aria-label="Current authenticator code"
+              disabled={mfaBusy}
+            />
+            <button onclick={() => beginFactorFlow("replace")} disabled={!rotateCode.trim() || mfaBusy}>
+              [ new authenticator ]
+            </button>
+          </div>
         {/if}
       {:else}
         <p class="hint">
           {mfaRequired
-            ? "required — you will be prompted to set this up at next sign-in"
-            : "protects your account if your password is stolen"}
+            ? "required — set this up now, or you will be prompted at next sign-in"
+            : "protects your account even if your password is stolen"}
         </p>
+        <div class="field">
+          <button onclick={() => beginFactorFlow("enroll")}>[ set up 2fa ]</button>
+        </div>
       {/if}
     {/if}
 
@@ -384,16 +479,47 @@
         aria-label="Password"
         disabled={passwordSaving || passwordRemoving}
       />
-      <button onclick={savePassword} disabled={!passwordUsername.trim() || passwordTooShort || !passwordValue.trim() || passwordSaving || passwordRemoving}>
+    </div>
+    {#if needsProof}
+      <div class="field">
+        <input
+          bind:value={setPasswordReauth}
+          type={proof === "code" ? "text" : "password"}
+          inputmode={proof === "code" ? "numeric" : undefined}
+          autocomplete={proof === "code" ? "one-time-code" : "current-password"}
+          placeholder={proofLabel}
+          spellcheck="false"
+          aria-label="Confirm with {proofLabel}"
+          disabled={passwordSaving || passwordRemoving}
+        />
+      </div>
+    {/if}
+    <div class="field">
+      <button onclick={savePassword} disabled={!passwordUsername.trim() || passwordTooShort || !passwordValue.trim() || passwordSaving || passwordRemoving || (needsProof && !setPasswordReauth.trim())}>
         {hasPassword ? "[ update ]" : "[ set ]"}
       </button>
     </div>
     {#if passwordTooShort}
       <p class="hint warning">password must be at least {MIN_PASSWORD_LENGTH} characters</p>
     {/if}
+    <p class="hint">changing this signs out every other session</p>
     {#if hasPassword}
+      {#if needsProof}
+        <div class="field">
+          <input
+            bind:value={removePasswordReauth}
+            type={proof === "code" ? "text" : "password"}
+            inputmode={proof === "code" ? "numeric" : undefined}
+            autocomplete={proof === "code" ? "one-time-code" : "current-password"}
+            placeholder={proofLabel}
+            spellcheck="false"
+            aria-label="Confirm removal with {proofLabel}"
+            disabled={passwordSaving || passwordRemoving}
+          />
+        </div>
+      {/if}
       <div class="field">
-        <button onclick={removePassword} disabled={passwordSaving || passwordRemoving}>[ remove password ]</button>
+        <button onclick={removePassword} disabled={passwordSaving || passwordRemoving || (needsProof && !removePasswordReauth.trim())}>[ remove password ]</button>
       </div>
     {/if}
 

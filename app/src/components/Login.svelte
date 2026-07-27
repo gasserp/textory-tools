@@ -82,6 +82,9 @@
 
     <div class="field">
       <label for="login-code">{usingRecoveryCode ? "recovery code" : "code"}</label>
+      <!-- Recovery maxlength is 40, not 32: a code is exactly 32 chars, so a 32 cap
+           truncates a paste carrying a leading or trailing space before submitCode()
+           strips it — the user then sees "invalid code" for a code that was right. -->
       <!-- svelte-ignore a11y_autofocus -->
       <input
         id="login-code"
@@ -89,7 +92,7 @@
         type="text"
         inputmode={usingRecoveryCode ? "text" : "numeric"}
         autocomplete="one-time-code"
-        maxlength={usingRecoveryCode ? 32 : 7}
+        maxlength={usingRecoveryCode ? 40 : 7}
         spellcheck="false"
         autofocus
       />
