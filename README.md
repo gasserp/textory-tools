@@ -23,6 +23,8 @@ All client applications call the production API at `https://textory.dev/api`.
 - GitHub SSO (Azure Static Web Apps auth) — admin-approved beta signups
 - Username/password login with `txs_...` session tokens — for native/desktop
   clients that can't use SWA's GitHub SSO cookies
+- Username/password login on the web, with mandatory TOTP two-factor
+  authentication — see [Authentication](#authentication)
 - Snippets CRUD with Markdown content, rich/plain copy
 - LLM classify/tag/summary using **your own Anthropic API key** (claude-haiku-4-5)
 - Camera/image capture → OCR → snippet (Claude vision, using your own
@@ -94,10 +96,17 @@ npm run dev -w app # Svelte dev server
 For full-stack local development with the backend API, see the private `gasserp/textory` repository. Most contributors will instead build and run the client applications in "native mode" against the production API:
 
 ```bash
-VITE_NATIVE=1 VITE_API_BASE=https://textory.dev/api npm run dev -w app
+VITE_NATIVE=1 VITE_API_BASE=https://textory.dev npm run dev -w app
 ```
 
-This is the same approach used by the desktop and Apple apps.
+This is the same approach used by the desktop and Apple apps. (`VITE_API_BASE` is the
+origin only — `/api` is appended by `app/src/lib/api.ts`.)
+
+Note that this runs the **native** auth path — a bearer token in `localStorage` —
+inside a real browser. That's fine for working on snippet UI, but it is not the web
+auth path, and the web password/2FA flows can't be exercised this way. Those need the
+backend from the private `gasserp/textory` repo: they depend on same-origin cookies
+and `Origin` validation, neither of which survives a dev-server hop to production.
 
 Type-checking and production builds:
 
@@ -125,6 +134,33 @@ Build with Xcode — see [apple/README.md](apple/README.md).
 
 See [desktop/README.md](desktop/README.md).
 
+## Authentication
+
+Three ways in:
+
+| Client | Credential | Session |
+|---|---|---|
+| Web (GitHub SSO) | GitHub | SWA cookie |
+| Web (password) | username + password + TOTP | `__Host-txs` HttpOnly cookie |
+| Native / CLI | username + password + TOTP | `txs_...` bearer token |
+
+**Two-factor authentication is mandatory.** Signing in with a password takes two
+steps: the password is verified first and returns only a short-lived challenge —
+never a session — and a TOTP code from an authenticator app completes it. Enrolment
+issues 10 single-use recovery codes, shown once; they are the only way back in if you
+lose your authenticator.
+
+The web session is an `HttpOnly` cookie rather than a token in `localStorage`, so a
+cross-site-scripting bug cannot read it.
+
+> **Status: the client half only.** Enforcement — not issuing a session before the
+> second factor, rate limiting, replay rejection, and the authorisation gate that
+> actually blocks unenrolled sessions — lives in the closed-source API. The web UI
+> stays hidden until `GET /api/auth/capabilities` reports server support, so nothing
+> here claims protection the backend isn't providing yet.
+>
+> The full server contract and threat model: [docs/AUTH_CONTRACT.md](docs/AUTH_CONTRACT.md).
+
 ## Security & cost
 
 - **LLM calls use each user's own Anthropic API key**: every user enters
@@ -142,13 +178,16 @@ Production build of `app` (gzip):
 
 | Asset | Size (gzip) |
 |---|---|
-| `index-*.js` | ~115 KB |
-| `index-*.css` | ~2.7 KB |
-| **Total** | **~118 KB** |
+| `index-*.js` | ~123 KB |
+| `index-*.css` | ~3.2 KB |
+| **Total (first load)** | **~127 KB** |
 
 Well under the ~150 KB target. `highlight.js/lib/common` (the slim build with
 only common languages) is used for syntax highlighting — nothing imports the
 full `highlight.js`.
+
+The QR encoder (`uqr`) is a lazy chunk (~4.7 KB gzip) fetched only during
+two-factor enrolment, so it stays out of the first load.
 
 ## Beta limitations
 

@@ -1,16 +1,25 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { loadSession, logout, requestAccess, session } from "./lib/stores.svelte";
+  import { currentCapabilities } from "./lib/capabilities";
   import { isNative } from "./lib/runtime";
   import Shell from "./components/Shell.svelte";
   import Terms from "./components/Terms.svelte";
   import Privacy from "./components/Privacy.svelte";
   import Login from "./components/Login.svelte";
+  import TwoFactorSetup from "./components/TwoFactorSetup.svelte";
   import Main from "./Main.svelte";
 
   let showTerms = $state(false);
   let showPrivacy = $state(false);
   let acceptedTerms = $state(false);
+
+  // On the web the password form appears only once the API says it can issue a cookie
+  // session for one. Until then this is exactly today's GitHub-SSO-only screen.
+  const showPasswordLogin = $derived(isNative || currentCapabilities().webPasswordLogin);
+  // Password sessions aren't cleared by the SWA /logout redirect, so they need a real
+  // sign-out control of their own.
+  const showLogout = $derived(isNative || currentCapabilities().webPasswordLogin);
 
   onMount(loadSession);
 </script>
@@ -18,13 +27,17 @@
 <Shell>
   {#if session.status === "loading"}
     <p>textory ▌</p>
-  {:else if session.status === "anonymous"}
+  {:else if session.status === "anonymous" || session.status === "mfa_challenge"}
     <p>textory ▌</p>
-    {#if isNative}
+    {#if showPasswordLogin}
       <Login />
-    {:else}
+    {/if}
+    {#if !isNative && session.status === "anonymous"}
       <a href="/login">[ sign in with github ]</a>
     {/if}
+  {:else if session.status === "mfa_enrollment"}
+    <!-- Must precede "approved": otherwise an unenrolled user just reloads into the app. -->
+    <TwoFactorSetup />
   {:else if session.status === "unregistered"}
     <p>textory ▌ — a fast, console-style snippet manager. beta access is admin-approved.</p>
     <p>
@@ -46,12 +59,12 @@
     <button onclick={requestAccess} disabled={!acceptedTerms}>[ request access ]</button>
   {:else if session.status === "pending"}
     <p>access requested — awaiting approval</p>
-    {#if isNative}
+    {#if showLogout}
       <button onclick={logout}>[ log out ]</button>
     {/if}
   {:else if session.status === "rejected"}
     <p>access denied</p>
-    {#if isNative}
+    {#if showLogout}
       <button onclick={logout}>[ log out ]</button>
     {/if}
   {:else if session.status === "approved"}
@@ -61,6 +74,10 @@
       </div>
     {/if}
     <Main />
+  {:else}
+    <!-- Catch-all: an unrecognised status must not render a blank page. -->
+    <p>textory ▌</p>
+    <p>unexpected session state — please reload.</p>
   {/if}
 </Shell>
 

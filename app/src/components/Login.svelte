@@ -1,13 +1,29 @@
 <script lang="ts">
-  import { passwordLogin, passwordRegister } from "../lib/stores.svelte";
+  import { clearChallenge, passwordLogin, passwordRegister, session, verifyTwoFactor } from "../lib/stores.svelte";
+  import { isNative } from "../lib/runtime";
   import { showToast } from "../lib/toast.svelte";
 
   let mode: "login" | "register" = $state("login");
   let username = $state("");
   let password = $state("");
+  let code = $state("");
+  let usingRecoveryCode = $state(false);
   let submitting = $state(false);
 
-  async function submit(): Promise<void> {
+  // Registration creates an account with no second factor and, on the web, would need
+  // the terms checkbox the unregistered flow already shows. Web users register through
+  // GitHub SSO + request access.
+  const canRegister = isNative;
+  const awaitingCode = $derived(session.status === "mfa_challenge");
+
+  /**
+   * One string for every authentication failure. The server's own error text is
+   * discarded: distinguishing "no such user" from "wrong password" — or a valid
+   * username from an invalid one — hands out an account-enumeration oracle.
+   */
+  const GENERIC_AUTH_ERROR = "invalid username or password";
+
+  async function submitCredentials(): Promise<void> {
     if (!username.trim() || !password || submitting) return;
     submitting = true;
     try {
@@ -16,65 +32,124 @@
       } else {
         await passwordRegister(username.trim().toLowerCase(), password);
       }
-    } catch (e) {
-      showToast(e instanceof Error ? e.message : "sign in failed");
+      password = "";
+    } catch {
+      showToast(GENERIC_AUTH_ERROR);
     } finally {
       submitting = false;
     }
   }
 
-  function toggleMode(): void {
-    mode = mode === "login" ? "register" : "login";
+  async function submitCode(): Promise<void> {
+    // Authenticator apps render codes as "123 456".
+    const entered = code.replace(/\s/g, "");
+    if (!entered || submitting) return;
+    submitting = true;
+    try {
+      await verifyTwoFactor(entered);
+      code = "";
+    } catch (e) {
+      // "too many attempts" and an expired challenge are actionable and leak nothing;
+      // anything else collapses to the generic string.
+      const message = e instanceof Error ? e.message : "";
+      const safe = message === "too many attempts" || message === "challenge expired";
+      showToast(safe ? message : "invalid code");
+      if (message === "challenge expired") cancelChallenge();
+    } finally {
+      submitting = false;
+    }
   }
 
-  function onKeydown(e: KeyboardEvent): void {
-    if (e.key === "Enter") {
-      e.preventDefault();
-      submit();
-    }
+  function cancelChallenge(): void {
+    clearChallenge();
+    code = "";
+    password = "";
+    usingRecoveryCode = false;
+    session.status = "anonymous";
+  }
+
+  function toggleMode(): void {
+    mode = mode === "login" ? "register" : "login";
+    password = "";
   }
 </script>
 
-<div class="login">
-  <p class="hint">{mode === "login" ? "sign in" : "create an account"}</p>
+{#if awaitingCode}
+  <form class="login" onsubmit={(e) => { e.preventDefault(); submitCode(); }}>
+    <p class="hint">
+      {usingRecoveryCode ? "enter a recovery code" : "enter the 6-digit code from your authenticator"}
+    </p>
 
-  <div class="field">
-    <label for="login-username">username</label>
-    <input
-      id="login-username"
-      bind:value={username}
-      type="text"
-      autocomplete="username"
-      spellcheck="false"
-      onkeydown={onKeydown}
-    />
-  </div>
+    <div class="field">
+      <label for="login-code">{usingRecoveryCode ? "recovery code" : "code"}</label>
+      <!-- svelte-ignore a11y_autofocus -->
+      <input
+        id="login-code"
+        bind:value={code}
+        type="text"
+        inputmode={usingRecoveryCode ? "text" : "numeric"}
+        autocomplete="one-time-code"
+        maxlength={usingRecoveryCode ? 32 : 7}
+        spellcheck="false"
+        autofocus
+      />
+    </div>
 
-  <div class="field">
-    <label for="login-password">password</label>
-    <input
-      id="login-password"
-      bind:value={password}
-      type="password"
-      autocomplete={mode === "login" ? "current-password" : "new-password"}
-      spellcheck="false"
-      onkeydown={onKeydown}
-    />
-  </div>
+    <div class="actions">
+      <button type="submit" disabled={!code.trim() || submitting}>[ verify ]</button>
+      <button
+        type="button"
+        class="link"
+        onclick={() => { usingRecoveryCode = !usingRecoveryCode; code = ""; }}
+        disabled={submitting}
+      >
+        [ {usingRecoveryCode ? "use an authenticator code" : "use a recovery code instead"} ]
+      </button>
+      <button type="button" class="link" onclick={cancelChallenge} disabled={submitting}>[ cancel ]</button>
+    </div>
+  </form>
+{:else}
+  <form class="login" onsubmit={(e) => { e.preventDefault(); submitCredentials(); }}>
+    <p class="hint">{mode === "login" ? "sign in" : "create an account"}</p>
 
-  <div class="actions">
-    <button onclick={submit} disabled={!username.trim() || !password || submitting}>
-      [ {mode === "login" ? "sign in" : "register"} ]
-    </button>
-    <button class="link" onclick={toggleMode} disabled={submitting}>
-      [ {mode === "login" ? "need an account? register" : "have an account? sign in"} ]
-    </button>
-  </div>
+    <div class="field">
+      <label for="login-username">username</label>
+      <input
+        id="login-username"
+        bind:value={username}
+        type="text"
+        autocomplete="username"
+        spellcheck="false"
+      />
+    </div>
 
-  {#if mode === "register"}
-    <p class="hint">beta access is admin-approved — registering creates a pending account.</p>
-  {/if}
-</div>
+    <div class="field">
+      <label for="login-password">password</label>
+      <input
+        id="login-password"
+        bind:value={password}
+        type="password"
+        autocomplete={mode === "login" ? "current-password" : "new-password"}
+        spellcheck="false"
+      />
+    </div>
+
+    <div class="actions">
+      <button type="submit" disabled={!username.trim() || !password || submitting}>
+        [ {mode === "login" ? "sign in" : "register"} ]
+      </button>
+      {#if canRegister}
+        <button type="button" class="link" onclick={toggleMode} disabled={submitting}>
+          [ {mode === "login" ? "need an account? register" : "have an account? sign in"} ]
+        </button>
+      {/if}
+    </div>
+
+    {#if mode === "register"}
+      <p class="hint">beta access is admin-approved — registering creates a pending account.</p>
+    {/if}
+  </form>
+{/if}
 
 <style>
   .login {
