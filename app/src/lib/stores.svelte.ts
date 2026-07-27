@@ -1,6 +1,7 @@
 import { apiFetch, setAuthErrorHandler } from "./api";
 import { clearToken, isNative, setToken } from "./runtime";
 import { currentCapabilities, loadCapabilities, resetCapabilities } from "./capabilities";
+import type { ReauthPayload } from "./reauth";
 
 export type UserStatus = "pending" | "approved" | "rejected";
 
@@ -69,8 +70,29 @@ setAuthErrorHandler((status, error) => {
     // The server flipped to enforcing while this tab was open. Without this the app
     // would just spray 403 toasts over a screen the user can no longer use.
     session.status = "mfa_enrollment";
+    // `session.user` is from before the flip, so `mfaEnabled` may be stale and decide
+    // the wrong wall — enrolment for someone who already has a factor is a dead end.
+    // /me is on the server's allowlist, so this cannot 403 back into here.
+    void refreshUser();
   }
 });
+
+let refreshingUser = false;
+
+/** Re-reads /me without touching session.status. Guarded against re-entry. */
+async function refreshUser(): Promise<void> {
+  if (refreshingUser) return;
+  refreshingUser = true;
+  try {
+    const me = await apiFetch<MeResponse>("/me", { skipAuthHandler: true });
+    if (me.status !== "unregistered") session.user = me;
+  } catch {
+    // Best-effort: the wall is already up, and a failed refresh just leaves the
+    // status quo rather than making things worse.
+  } finally {
+    refreshingUser = false;
+  }
+}
 
 export async function loadSession(): Promise<void> {
   await loadCapabilities();
@@ -202,6 +224,53 @@ export function completeMfaEnrollment(): void {
   if (session.user) session.status = statusFor(session.user);
 }
 
+/**
+ * Prove a second factor for a session that already authenticated some other way.
+ *
+ * GitHub SSO is the case this exists for: Azure exposes no MFA claim, so an SSO
+ * session is never `mfaSatisfied` and the enrolment routes are the only ones open to
+ * it. A user who already enrolled would be walled forever with nothing to click —
+ * `/auth/2fa/enroll` refuses while a factor is active. Here the SSO session is the
+ * first factor and the code is the second; the server replies with a cookie session
+ * that supersedes the SWA principal.
+ */
+export async function stepUpTwoFactor(code: string): Promise<void> {
+  const { user } = await apiFetch<{ user: MeUser }>("/auth/web/2fa/step-up", {
+    method: "POST",
+    body: JSON.stringify({ code }),
+    skipAuthHandler: true,
+  });
+  session.status = statusFor(user);
+  session.user = user;
+}
+
+/**
+ * Step 1 of moving to a new authenticator: prove the *current* factor, get a new
+ * pending secret. The existing factor keeps working until step 2 lands, so a mistyped
+ * key or a clock-skewed phone is recoverable rather than a lockout.
+ */
+export async function replaceTwoFactor(code: string): Promise<EnrollResponse> {
+  return apiFetch<EnrollResponse>("/auth/2fa/replace", {
+    method: "POST",
+    body: JSON.stringify({ code }),
+    skipAuthHandler: true,
+  });
+}
+
+/** Step 2: prove the *new* factor. Swaps it in and invalidates every other session. */
+export async function activateReplacement(code: string): Promise<string[]> {
+  const { recoveryCodes } = await apiFetch<{ recoveryCodes: string[] }>(
+    "/auth/2fa/replace/activate",
+    { method: "POST", body: JSON.stringify({ code }), skipAuthHandler: true },
+  );
+  if (session.user) {
+    session.user.mfaEnabled = true;
+    session.user.mfaSatisfied = true;
+    session.user.recoveryCodesRemaining = recoveryCodes.length;
+  }
+  return recoveryCodes;
+}
+
 /** Re-auth is a fresh code, or a password for accounts that have one. */
 export async function disableTwoFactor(code: string, password?: string): Promise<void> {
   await apiFetch<{ ok: true }>("/auth/2fa/disable", {
@@ -272,20 +341,22 @@ export type CliTokenResponse = {
   createdAt: string;
 };
 
-export async function generateCliToken(): Promise<CliTokenResponse> {
+/**
+ * A CLI token bypasses 2FA by design, so the server only mints one from a session
+ * that has satisfied a second factor, and only with fresh re-authentication.
+ */
+export async function generateCliToken(reauth: ReauthPayload): Promise<CliTokenResponse> {
   const response = await apiFetch<CliTokenResponse>("/settings/cli-token", {
     method: "POST",
+    body: JSON.stringify(reauth),
+    skipAuthHandler: true,
   });
   if (session.user) session.user.cliTokenCreatedAt = response.createdAt;
   return response;
 }
 
-export async function regenerateCliToken(): Promise<CliTokenResponse> {
-  const response = await apiFetch<CliTokenResponse>("/settings/cli-token", {
-    method: "POST",
-  });
-  if (session.user) session.user.cliTokenCreatedAt = response.createdAt;
-  return response;
+export async function regenerateCliToken(reauth: ReauthPayload): Promise<CliTokenResponse> {
+  return generateCliToken(reauth);
 }
 
 export async function revokeCliToken(): Promise<void> {
@@ -293,15 +364,39 @@ export async function revokeCliToken(): Promise<void> {
   if (session.user) session.user.cliTokenCreatedAt = null;
 }
 
-export async function setPassword(username: string, password: string): Promise<void> {
+/**
+ * Set or change the account password.
+ *
+ * The re-auth password is sent as `currentPassword`: `password` is already taken by
+ * the new value, and conflating the two would let the new password authorise its own
+ * change.
+ *
+ * Changing the password invalidates every other session, so anything else signed in
+ * as this user is signed out.
+ */
+export async function setPassword(
+  username: string,
+  password: string,
+  reauth: ReauthPayload,
+): Promise<void> {
   await apiFetch<{ ok: true }>("/settings/password", {
     method: "PUT",
-    body: JSON.stringify({ username, password }),
+    body: JSON.stringify({
+      username,
+      password,
+      ...(reauth.code !== undefined ? { code: reauth.code } : {}),
+      ...(reauth.password !== undefined ? { currentPassword: reauth.password } : {}),
+    }),
+    skipAuthHandler: true,
   });
   if (session.user) session.user.hasPassword = true;
 }
 
-export async function clearPassword(): Promise<void> {
-  await apiFetch<{ ok: true }>("/settings/password", { method: "DELETE" });
+export async function clearPassword(reauth: ReauthPayload): Promise<void> {
+  await apiFetch<{ ok: true }>("/settings/password", {
+    method: "DELETE",
+    body: JSON.stringify(reauth),
+    skipAuthHandler: true,
+  });
   if (session.user) session.user.hasPassword = false;
 }

@@ -1,6 +1,14 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { loadSession, logout, requestAccess, session } from "./lib/stores.svelte";
+  import {
+    activateTwoFactor,
+    completeMfaEnrollment,
+    enrollTwoFactor,
+    loadSession,
+    logout,
+    requestAccess,
+    session,
+  } from "./lib/stores.svelte";
   import { currentCapabilities } from "./lib/capabilities";
   import { isNative } from "./lib/runtime";
   import Shell from "./components/Shell.svelte";
@@ -8,6 +16,8 @@
   import Privacy from "./components/Privacy.svelte";
   import Login from "./components/Login.svelte";
   import TwoFactorSetup from "./components/TwoFactorSetup.svelte";
+  import TwoFactorStepUp from "./components/TwoFactorStepUp.svelte";
+  import EnrollBanner from "./components/EnrollBanner.svelte";
   import Main from "./Main.svelte";
 
   let showTerms = $state(false);
@@ -20,6 +30,15 @@
   // Password sessions aren't cleared by the SWA /logout redirect, so they need a real
   // sign-out control of their own.
   const showLogout = $derived(isNative || currentCapabilities().webPasswordLogin);
+
+  /**
+   * The server says a factor already exists, so this tab's `me` was stale and the user
+   * belongs on the step-up screen, not enrolment. Refreshing re-evaluates the branch
+   * above; without it the retry button re-requests enrolment and 409s forever.
+   */
+  async function onEnrollStartFailed(message: string): Promise<void> {
+    if (message === "2fa already enabled") await loadSession();
+  }
 
   onMount(loadSession);
 </script>
@@ -37,7 +56,22 @@
     {/if}
   {:else if session.status === "mfa_enrollment"}
     <!-- Must precede "approved": otherwise an unenrolled user just reloads into the app. -->
-    <TwoFactorSetup />
+    {#if session.user?.mfaEnabled}
+      <!-- Already has a factor, this session just hasn't proved it (every GitHub-SSO
+           session, always). Sending them to enrolment would dead-end: /2fa/enroll
+           refuses while a factor is active. -->
+      <TwoFactorStepUp />
+    {:else}
+      <TwoFactorSetup
+        title="two-factor authentication required"
+        start={enrollTwoFactor}
+        finish={activateTwoFactor}
+        onDone={completeMfaEnrollment}
+        onCancel={logout}
+        cancelLabel="sign out"
+        onStartFailed={onEnrollStartFailed}
+      />
+    {/if}
   {:else if session.status === "unregistered"}
     <p>textory ▌ — a fast, console-style snippet manager. beta access is admin-approved.</p>
     <p>
@@ -73,6 +107,7 @@
         <button onclick={logout}>[ log out ]</button>
       </div>
     {/if}
+    <EnrollBanner />
     <Main />
   {:else}
     <!-- Catch-all: an unrecognised status must not render a blank page. -->

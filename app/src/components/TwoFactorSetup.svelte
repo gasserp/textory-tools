@@ -1,7 +1,46 @@
 <script lang="ts">
-  import { activateTwoFactor, completeMfaEnrollment, enrollTwoFactor, logout } from "../lib/stores.svelte";
+  import type { EnrollResponse } from "../lib/stores.svelte";
   import { showToast } from "../lib/toast.svelte";
   import { copyPlain } from "../lib/clipboard";
+
+  /**
+   * Shared by three flows that are the same six steps with different endpoints:
+   * the enrolment wall, voluntary enrolment from Settings, and moving to a new
+   * authenticator. The caller supplies start/finish so this component never has to
+   * know which it is — and so the "save your recovery codes" screen, the part that
+   * locks people out when it is skipped, cannot be forgotten by one of them.
+   */
+  let {
+    title,
+    start,
+    finish,
+    onDone,
+    onCancel,
+    cancelLabel = "cancel",
+    onStartFailed,
+    codesVisible = $bindable(false),
+  }: {
+    title: string;
+    start: () => Promise<EnrollResponse>;
+    finish: (code: string) => Promise<string[]>;
+    onDone: () => void;
+    onCancel?: () => void;
+    cancelLabel?: string;
+    /**
+     * Called instead of rendering the retry screen when start() fails. Retrying is
+     * useless where the caller's input is already spent — a TOTP code that has been
+     * submitted once is either wrong or claimed in the server's replay ledger, so the
+     * caller needs to collect a fresh one.
+     */
+    onStartFailed?: (message: string) => void;
+    /**
+     * Lets a host block its own dismiss affordances while the codes are on screen.
+     * The component hides its cancel button then, but an overlay that closes on Esc
+     * or a backdrop click would still discard codes that are the account's only way
+     * back in — and by this point the previous set is already invalid server-side.
+     */
+    codesVisible?: boolean;
+  } = $props();
 
   let secret = $state("");
   let otpauthUri = $state("");
@@ -14,6 +53,10 @@
   let submitting = $state(false);
 
   const showingCodes = $derived(recoveryCodes.length > 0);
+
+  $effect(() => {
+    codesVisible = showingCodes;
+  });
 
   /**
    * Build an SVG path from the QR matrix.
@@ -41,7 +84,7 @@
   async function begin(): Promise<void> {
     loading = true;
     try {
-      const response = await enrollTwoFactor();
+      const response = await start();
       if (!response?.secret || !response?.otpauthUri) throw new Error("could not start setup");
       secret = response.secret;
       otpauthUri = response.otpauthUri;
@@ -51,7 +94,9 @@
       qrSize = qr.size + QUIET_ZONE * 2;
       qrPath = buildPath(qr.data);
     } catch (e) {
-      showToast(e instanceof Error ? e.message : "could not start setup");
+      const message = e instanceof Error ? e.message : "could not start setup";
+      showToast(message);
+      onStartFailed?.(message);
     } finally {
       loading = false;
     }
@@ -62,14 +107,22 @@
     if (!entered || submitting) return;
     submitting = true;
     try {
-      recoveryCodes = await activateTwoFactor(entered);
+      const issued = await finish(entered);
+      if (!Array.isArray(issued) || issued.length === 0) {
+        throw new Error("two-factor is enabled, but the recovery codes could not be shown — generate a new set in settings");
+      }
+      recoveryCodes = issued;
       // The pending secret is dead once activated; don't keep it around.
       secret = "";
       otpauthUri = "";
       qrPath = "";
       code = "";
-    } catch {
-      showToast("invalid code");
+    } catch (e) {
+      // Only a genuine rejection is "invalid code". Anything else (notably the
+      // codes-missing case above) would otherwise send the user round a retry loop
+      // that cannot succeed, because the factor is already active.
+      const message = e instanceof Error ? e.message : "";
+      showToast(message.includes("recovery codes") ? message : "invalid code");
     } finally {
       submitting = false;
     }
@@ -89,7 +142,7 @@
 </script>
 
 <div class="setup">
-  <h2>two-factor authentication required</h2>
+  <h2>{title}</h2>
 
   {#if showingCodes}
     <p>save these recovery codes. each works once, and they are the only way back in if you lose your authenticator.</p>
@@ -117,7 +170,7 @@
       </label>
     </p>
     <div class="actions">
-      <button disabled={!acknowledged} onclick={() => { recoveryCodes = []; completeMfaEnrollment(); }}>[ continue ]</button>
+      <button disabled={!acknowledged} onclick={() => { recoveryCodes = []; onDone(); }}>[ continue ]</button>
     </div>
   {:else if loading}
     <p>setting up…</p>
@@ -167,9 +220,9 @@
     </div>
   {/if}
 
-  {#if !showingCodes}
+  {#if !showingCodes && onCancel}
     <div class="actions">
-      <button class="link" onclick={logout}>[ sign out ]</button>
+      <button class="link" onclick={onCancel}>[ {cancelLabel} ]</button>
     </div>
   {/if}
 </div>
