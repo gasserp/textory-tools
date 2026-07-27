@@ -1,7 +1,8 @@
 import { setTheme } from "./theme.svelte";
 import { openHelp, openAdmin, openSettings } from "./overlay.svelte";
 import { showList, showNew, viewState } from "./view.svelte";
-import { session } from "./stores.svelte";
+import { logout, session } from "./stores.svelte";
+import { isNative } from "./runtime";
 import { focusSearch } from "./search.svelte";
 import { runClassify } from "./classify.svelte";
 
@@ -48,7 +49,12 @@ export function getCommands(): Command[] {
       title: "sign out",
       keywords: ["sign", "out", "logout"],
       run: () => {
-        window.location.href = "/logout";
+        // Revoke the API session first. Navigating straight to /logout only clears the
+        // SWA cookie, so a password (__Host-txs) session survived it — the user was
+        // bounced to / and left signed in.
+        void logout().finally(() => {
+          if (!isNative) window.location.href = "/logout";
+        });
       },
     },
     { id: "help", title: "help", keywords: ["help", "keys", "shortcuts"], run: openHelp },

@@ -21,8 +21,14 @@ function hasLocalStorage(): boolean {
   }
 }
 
+/**
+ * Token storage is native-only. In the browser the session is an HttpOnly cookie the
+ * page can't read, so a `txs_...` token must never reach localStorage there: an XSS on
+ * textory.dev (the app runs marked/highlight.js over snippet content) would exfiltrate
+ * a permanent credential. These guards keep that true if a future caller forgets.
+ */
 export function getToken(): string | null {
-  if (!hasLocalStorage()) return null;
+  if (!isNative || !hasLocalStorage()) return null;
   try {
     return localStorage.getItem(TOKEN_KEY);
   } catch {
@@ -31,7 +37,7 @@ export function getToken(): string | null {
 }
 
 export function setToken(token: string): void {
-  if (!hasLocalStorage()) return;
+  if (!isNative || !hasLocalStorage()) return;
   try {
     localStorage.setItem(TOKEN_KEY, token);
   } catch {

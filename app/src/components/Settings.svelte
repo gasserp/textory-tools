@@ -1,7 +1,8 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { closeOverlays } from "../lib/overlay.svelte";
-  import { session, saveAnthropicKey, deleteAnthropicKey, setAutoClassify, generateCliToken, regenerateCliToken, revokeCliToken, setPassword, clearPassword } from "../lib/stores.svelte";
+  import { session, saveAnthropicKey, deleteAnthropicKey, setAutoClassify, generateCliToken, regenerateCliToken, revokeCliToken, setPassword, clearPassword, disableTwoFactor, regenerateRecoveryCodes } from "../lib/stores.svelte";
+  import { currentCapabilities } from "../lib/capabilities";
   import { showToast } from "../lib/toast.svelte";
   import { copyPlain } from "../lib/clipboard";
 
@@ -18,6 +19,18 @@
   let passwordValue = $state("");
   let passwordSaving = $state(false);
   let passwordRemoving = $state(false);
+  let mfaCode = $state("");
+  let mfaBusy = $state(false);
+  let freshRecoveryCodes: string[] = $state([]);
+
+  const MIN_PASSWORD_LENGTH = 10;
+  const passwordTooShort = $derived(
+    passwordValue.length > 0 && passwordValue.length < MIN_PASSWORD_LENGTH,
+  );
+  const mfaSupported = $derived(currentCapabilities().mfa !== "unsupported");
+  const mfaRequired = $derived(currentCapabilities().mfa === "required");
+  const mfaEnabled = $derived(session.user?.mfaEnabled ?? false);
+  const recoveryRemaining = $derived(session.user?.recoveryCodesRemaining);
 
   const hasKey = $derived(session.user?.hasAnthropicKey ?? false);
   const autoClassify = $derived(session.user?.autoClassify ?? false);
@@ -112,8 +125,42 @@
     }
   }
 
+  async function regenerateCodes(): Promise<void> {
+    const entered = mfaCode.replace(/\s/g, "");
+    if (!entered || mfaBusy) return;
+    mfaBusy = true;
+    try {
+      freshRecoveryCodes = await regenerateRecoveryCodes(entered);
+      mfaCode = "";
+      showToast("recovery codes regenerated");
+    } catch {
+      showToast("invalid code");
+    } finally {
+      mfaBusy = false;
+    }
+  }
+
+  async function turnOffTwoFactor(): Promise<void> {
+    const entered = mfaCode.replace(/\s/g, "");
+    if (!entered || mfaBusy) return;
+    mfaBusy = true;
+    try {
+      await disableTwoFactor(entered);
+      mfaCode = "";
+      showToast("two-factor disabled");
+    } catch {
+      showToast("invalid code");
+    } finally {
+      mfaBusy = false;
+    }
+  }
+
   async function savePassword(): Promise<void> {
     if (!passwordUsername.trim() || !passwordValue.trim() || passwordSaving) return;
+    if (passwordValue.length < MIN_PASSWORD_LENGTH) {
+      showToast(`password must be at least ${MIN_PASSWORD_LENGTH} characters`);
+      return;
+    }
     passwordSaving = true;
     try {
       await setPassword(passwordUsername.trim(), passwordValue);
@@ -251,6 +298,63 @@
       {/if}
     {/if}
 
+    {#if mfaSupported}
+      <div class="row">
+        <span>two-factor authentication</span>
+        <span class="status" class:ok={mfaEnabled} class:missing={!mfaEnabled}>
+          {mfaEnabled ? "enabled ✓" : "not set up"}
+        </span>
+      </div>
+
+      {#if mfaEnabled}
+        {#if recoveryRemaining != null}
+          <p class="hint">{recoveryRemaining} recovery code{recoveryRemaining === 1 ? "" : "s"} remaining</p>
+        {/if}
+
+        {#if freshRecoveryCodes.length > 0}
+          <p class="hint warning">shown once only — save these now</p>
+          <ul class="codes">
+            {#each freshRecoveryCodes as recoveryCode (recoveryCode)}
+              <li>{recoveryCode}</li>
+            {/each}
+          </ul>
+          <div class="field">
+            <button onclick={() => copyPlain(freshRecoveryCodes.join("\n"))}>[ copy ]</button>
+            <button onclick={() => (freshRecoveryCodes = [])}>[ done ]</button>
+          </div>
+        {:else}
+          <p class="hint">enter a current authenticator code to make changes</p>
+          <div class="field">
+            <input
+              bind:value={mfaCode}
+              type="text"
+              inputmode="numeric"
+              autocomplete="one-time-code"
+              maxlength="7"
+              placeholder="000000"
+              spellcheck="false"
+              aria-label="Authenticator code"
+              disabled={mfaBusy}
+            />
+            <button onclick={regenerateCodes} disabled={!mfaCode.trim() || mfaBusy}>[ new recovery codes ]</button>
+          </div>
+          {#if !mfaRequired}
+            <div class="field">
+              <button onclick={turnOffTwoFactor} disabled={!mfaCode.trim() || mfaBusy}>[ disable 2fa ]</button>
+            </div>
+          {:else}
+            <p class="hint">two-factor authentication is required and cannot be disabled</p>
+          {/if}
+        {/if}
+      {:else}
+        <p class="hint">
+          {mfaRequired
+            ? "required — you will be prompted to set this up at next sign-in"
+            : "protects your account if your password is stolen"}
+        </p>
+      {/if}
+    {/if}
+
     <div class="row">
       <span>password login</span>
       <span class="status" class:ok={hasPassword} class:missing={!hasPassword}>
@@ -274,16 +378,19 @@
       <input
         bind:value={passwordValue}
         type="password"
-        placeholder="password (min 10 chars)"
-        autocomplete="off"
+        placeholder="password (min {MIN_PASSWORD_LENGTH} chars)"
+        autocomplete="new-password"
         spellcheck="false"
         aria-label="Password"
         disabled={passwordSaving || passwordRemoving}
       />
-      <button onclick={savePassword} disabled={!passwordUsername.trim() || !passwordValue.trim() || passwordSaving || passwordRemoving}>
+      <button onclick={savePassword} disabled={!passwordUsername.trim() || passwordTooShort || !passwordValue.trim() || passwordSaving || passwordRemoving}>
         {hasPassword ? "[ update ]" : "[ set ]"}
       </button>
     </div>
+    {#if passwordTooShort}
+      <p class="hint warning">password must be at least {MIN_PASSWORD_LENGTH} characters</p>
+    {/if}
     {#if hasPassword}
       <div class="field">
         <button onclick={removePassword} disabled={passwordSaving || passwordRemoving}>[ remove password ]</button>
@@ -394,6 +501,18 @@
   }
 
   .monospace {
+    font-family: monospace;
+  }
+
+  .codes {
+    display: grid;
+    grid-template-columns: repeat(2, max-content);
+    gap: var(--sp-1) var(--sp-3);
+    margin: var(--sp-2) 0 0;
+    padding: var(--sp-2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    list-style: none;
     font-family: monospace;
   }
 </style>
