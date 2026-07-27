@@ -57,6 +57,14 @@ On submit, the app calls `/api/auth/login` (or `/api/auth/register`) to
 obtain a `txs_...` session token, which is stored in `localStorage` and sent
 on subsequent requests via the `x-textory-token` header.
 
+Once the server enforces two-factor authentication (`MFA_MODE=required`) and
+your account has an active factor, `/api/auth/login` returns a short-lived
+challenge rather than a token. The same screen then asks for a 6-digit
+authenticator code — or a recovery code — and posts it to
+`/api/auth/2fa/verify`, which is what issues the token. Both shapes are
+handled by the shared store in `app/src/lib/stores.svelte.ts`, so the desktop
+wrapper needs nothing of its own beyond a rebuild.
+
 If you don't have a password yet:
 
 - **Register directly in the app** — the login screen has a "need an

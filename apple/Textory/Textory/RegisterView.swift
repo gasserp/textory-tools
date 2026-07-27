@@ -58,10 +58,12 @@ struct RegisterView: View {
                 }
             }
             .onChange(of: authStore.state) { _, newState in
-                // Dismiss once we have a session (pending/rejected/approved
-                // all mean the register call succeeded).
+                // Dismiss once we have a session. A new account has no second
+                // factor, so under MFA_MODE=required it lands on the enrolment
+                // signpost — that is still a successful registration, and
+                // leaving the sheet up would hide it.
                 switch newState {
-                case .pending, .rejected, .approved:
+                case .pending, .rejected, .approved, .mfaEnrollmentRequired:
                     dismiss()
                 default:
                     break

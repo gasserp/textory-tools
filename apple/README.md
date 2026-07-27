@@ -31,6 +31,14 @@ TEXTORY_BASE_URL=http://localhost:4280
   and `/api/auth/register`. New accounts start in a "pending approval" state
   until an admin approves them; rejected accounts see an "access denied"
   message. Either state offers a sign-out action.
+- **Two-factor authentication** — `/api/auth/login` answers with a short-lived
+  challenge instead of a session once the server runs `MFA_MODE=required` and
+  the account has an active factor (`docs/AUTH_CONTRACT.md` §2.3, §2.7). The
+  app then asks for a 6-digit authenticator code or a recovery code and
+  exchanges it at `/api/auth/2fa/verify` for the session. Accounts with no
+  factor yet get a "set this up at textory.dev" signpost — enrolment itself is
+  the web app's job, because the secret and the recovery codes are shown
+  exactly once and this app has nowhere to put them.
 - **Snippet list** — the signed-in home screen lists the user's snippets
   newest-first, with pull-to-refresh, each row showing title, summary, and
   tags.
@@ -56,15 +64,20 @@ TEXTORY_BASE_URL=http://localhost:4280
   `Authorization` header before requests reach the API's managed functions,
   so this custom header is required — see `api/src/shared/auth.ts`).
 - `Models.swift` — `Codable` types mirroring the API's JSON shapes
-  (`User`, `Snippet`, `AuthResponse`).
+  (`User`, `Snippet`, `AuthResponse`, `Capabilities`), plus `LoginResponse`, a
+  sum type over the two things `/api/auth/login` can return: a session or a
+  2FA challenge.
 - `Keychain.swift` — stores the session token (`txs_...`) in the Keychain.
 - `AuthStore.swift` — `@Observable` session state (`loading`, `anonymous`,
-  `pending`, `rejected`, `approved(User)`), with `bootstrap()`, `login()`,
+  `awaitingSecondFactor`, `mfaEnrollmentRequired`, `pending`, `rejected`,
+  `approved(User)`), with `bootstrap()`, `login()`, `submitSecondFactor()`,
   `register()`, and `logout()`.
 - `RootView.swift` — switches on `AuthStore.state` to show the login flow,
-  an "awaiting approval" / "access denied" message, or the signed-in snippet
-  UI.
+  the second-factor prompt, an "awaiting approval" / "access denied" message,
+  or the signed-in snippet UI.
 - `LoginView.swift` / `RegisterView.swift` — sign-in and account creation.
+- `TwoFactorView.swift` — the second-factor prompt: an authenticator code or a
+  recovery code, exchanged for a session.
 - `SnippetStore.swift` — `@Observable` snippet list state: `load()`, `add()`,
   `remove()`.
 - `SnippetListView.swift` — the snippet list, with add/scan toolbar buttons,
