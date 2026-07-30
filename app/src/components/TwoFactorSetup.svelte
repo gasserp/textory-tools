@@ -253,7 +253,7 @@
 
   .codes {
     display: grid;
-    grid-template-columns: repeat(2, max-content);
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: var(--sp-1) var(--sp-3);
     margin: 0;
     padding: var(--sp-2);
@@ -261,6 +261,10 @@
     border-radius: var(--radius);
     list-style: none;
     font-family: monospace;
+  }
+
+  .codes li {
+    overflow-wrap: anywhere;
   }
 
   .field {
