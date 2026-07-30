@@ -79,6 +79,9 @@
     <p class="hint">
       {usingRecoveryCode ? "enter a recovery code" : "enter the 6-digit code from your authenticator"}
     </p>
+    <p class="hint">
+      not enrolled in two-factor yet? enter anything here to continue to setup.
+    </p>
 
     <div class="field">
       <label for="login-code">{usingRecoveryCode ? "recovery code" : "code"}</label>
