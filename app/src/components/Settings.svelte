@@ -353,7 +353,7 @@
     </div>
 
     <p class="hint">
-      classification uses claude-haiku-4-5 at your own cost via your Anthropic account. your key is encrypted at
+      classification uses claude-haiku-5-5 at your own cost via your Anthropic account. your key is encrypted at
       rest and never sent back to the browser.
     </p>
     <p class="hint">classification calls are sent to anthropic with your key — usage is billed to your anthropic account.</p>
