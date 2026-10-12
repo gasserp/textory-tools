@@ -26,7 +26,7 @@ All client applications call the production API at `https://textory.dev/api`.
 - Username/password login on the web, with mandatory TOTP two-factor
   authentication — see [Authentication](#authentication)
 - Snippets CRUD with Markdown content, rich/plain copy
-- LLM classify/tag/summary using **your own Anthropic API key** (claude-haiku-4-5)
+- LLM classify/tag/summary using **your own Anthropic API key** (claude-haiku-5-5)
 - Camera/image capture → OCR → snippet (Claude vision, using your own
   Anthropic key)
 - Fuzzy search (`fuse.js`) with `#tag` and `@category` filters
